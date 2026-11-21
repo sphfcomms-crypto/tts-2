@@ -1,90 +1,100 @@
-# OpenAI.fm
+# TTS
 
-[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![NextJS](https://img.shields.io/badge/Built_with-NextJS-blue)
-![OpenAI API](https://img.shields.io/badge/Powered_by-OpenAI_API-orange)
+An Urdu voice app: text to speech in a young woman's voice, live dictation, a
+two-way live voice call, and file in / file out. Everything runs on the OpenAI
+API; a small router picks the model for each job and fails over between models.
 
-[OpenAI.fm](https://openai.fm) is an interactive demo to showcase the new OpenAI text-to-speech models.
-It is built with NextJS and the [Speech API](https://platform.openai.com/docs/api-reference/audio/createSpeech).
+Built on [openai/openai-fm](https://github.com/openai/openai-fm) (MIT), the
+demo for OpenAI's speech API.
 
-For more information about text-to-speech using the OpenAI API, check out our [documentation](https://platform.openai.com/docs/guides/text-to-speech).
+## What it does
 
-![screenshot](./public/screenshot.jpg)
+- **Play**: speaks the script. Roman Urdu, Hinglish or Urdu script goes in;
+  it is first rewritten in Urdu script, in a young woman's words, with grammar
+  and punctuation fixed ("Urdu fix"), then spoken. Audio starts in about two
+  seconds: the script is spoken in sentence-sized pieces, generated in
+  parallel and streamed in order.
+- **Mic**: dictate the script. Speech is transcribed live and always arrives
+  in Urdu script.
+- **Live call**: talk with her in real time (WebRTC straight to the voice
+  model; the server only brokers the connection, so the API key stays on it).
+- **Upload**: a text file (.txt, .md, .srt), a Word file (.docx), a PDF, a
+  photo of a page, or a voice recording becomes the script.
+- **Voice / Text**: save the audio (.wav) or the spoken text (.txt).
+- **Settings**: voice, vibe (speaking style) and a few on/off options,
+  remembered in the browser.
 
-## How to run
+## Models
 
-1. **Set up the OpenAI API:**
+| Job | First choice | Then |
+| --- | --- | --- |
+| Urdu fix | gpt-4.1-mini | gpt-4o-mini, gpt-5.4-mini, gpt-4.1, gpt-4o, gpt-5-mini |
+| Voice | gpt-audio-mini | gpt-audio-1.5, gpt-4o-mini-tts, tts-1-hd, tts-1 |
+| Mic | gpt-transcribe | gpt-live-transcribe, gpt-4o-transcribe, per-turn transcription |
+| Live call | gpt-live-1.1 | gpt-live-1 |
+| Reading pages (PDF, photos) | gpt-4.1-mini | its dated snapshot only |
 
-   - If you're new to the OpenAI API, [sign up for an account](https://platform.openai.com/signup).
-   - Follow the [Quickstart](https://platform.openai.com/docs/quickstart) to retrieve your API key.
+The order comes from measurements, recorded in comments next to each list in
+`src/lib/router/`. Two of them are worth knowing:
 
-2. **Clone the Repository:**
+- The audio models garble the first word of a recording, so every piece is
+  recorded with a throwaway warm-up sentence that is cut off afterwards, and
+  each piece is transcribed and re-recorded if it does not say the text.
+- The text stored inside an Urdu PDF has the letters of each word in a
+  scrambled order, so Urdu PDFs are read from pictures of their pages. Only
+  gpt-4.1-mini read those reliably (95 to 100% of words); the other models
+  tested made sentences up.
 
-   ```bash
-   git clone https://github.com/openai/openai-fm.git
-   ```
+## Run it
 
-3. **Set the OpenAI API key:**
+Needs Node.js 22 or newer.
 
-   2 options:
+```bash
+cp .env.example .env    # then put your key after OPENAI_API_KEY=
+npm install
+npm run dev             # http://localhost:3000
+```
 
-   - Set the `OPENAI_API_KEY` environment variable [globally in your system](https://platform.openai.com/docs/libraries#create-and-export-an-api-key)
-   - Set the `OPENAI_API_KEY` environment variable in the project: Create a `.env` file at the root of the project and add the following line (see `.env.example` for reference):
+Settings in `.env`:
 
-   ```bash
-   OPENAI_API_KEY=<your_api_key>
-   ```
+| Name | Meaning |
+| --- | --- |
+| `OPENAI_API_KEY` | Required. |
+| `APP_PASSWORD` | Optional. Locks the production site behind this password. |
+| `LIMIT_*`, `CALL_MAX_MINUTES`, `USAGE_LIMITS` | Optional usage caps for a public server; see `.env.example`. |
 
-4. **Install dependencies:**
+A production build that does not disturb the dev server:
+`run-prod.bat` (Windows, port 3080).
 
-   Run in the project root:
+## Deploy
 
-   ```bash
-   npm install
-   ```
+`deploy/deploy.sh` uploads the code to a Linux server over SSH, builds it
+there, runs it as a systemd service and publishes it with Tailscale Funnel
+(public HTTPS, no changes to any web server already on the machine). The
+build happens before the switch, so a failed build leaves the running site
+untouched.
 
-5. **(Optional) Connect to a hosted database:**
+```bash
+bash deploy/deploy.sh --with-env   # first time, or after changing .env
+bash deploy/deploy.sh              # code only
+```
 
-   If you want to use the sharing feature, you need to connect to a hosted postgres database.
-   You should set the environment variables in a `.env` file at the root of the project to connect to your database as shown in `.env.example`.
+The server address, SSH key and ports are at the top of the script and can be
+overridden with `TTS_SERVER`, `TTS_SSH_KEY`, `TTS_PORT`, `TTS_FUNNEL_PORT`.
 
-   ```bash
-   POSTGRES_URL="postgresql://username:password@host:port/database_name"
-   ```
+A public server spends money on your OpenAI key for every visitor. The
+production build caps usage per visitor and per day (`src/lib/usage.ts`), and
+each live call ends after ten minutes; set `APP_PASSWORD` to lock the site.
 
-   This step is not needed to run the application and only affects the sharing feature.
+## Limits
 
-6. **Run the app:**
-
-   ```bash
-   npm run dev
-   ```
-
-   The app will be available at [`http://localhost:3000`](http://localhost:3000).
-
-> [!NOTE]  
-> Be aware that if you deploy this app to a public server, you are responsible for any usage it may incur using your OpenAI API key.
-
-## Contributors
-
-### OpenAI team
-
-- [Tyler Smith](https://github.com/tylersmith-openai)
-- [Karolis Kosas](https://github.com/karoliskosas)
-- [Justin Jay Wang](https://github.com/justinjaywang)
-- [Bobby Stocker](https://github.com/stocker-openai)
-- [Jeff Harris](https://github.com/jeffsharris)
-- [Romain Huet](https://github.com/romainhuet)
-- [David Weedon](https://github.com/weedon-openai)
-- [Iaroslav Tverdokhlib](https://github.com/itv-openai)
-- [Adam Walker](https://github.com/awalker-openai)
-- [Edwin Arbus](https://x.com/edwinarbus)
-- [Katia Gil Guzman](https://github.com/katia-openai)
-
-### Contributing
-
-You are welcome to open issues or submit PRs to improve this app, however, please note that we may not review all suggestions.
+- A script is at most 3000 characters (about three minutes of speech).
+  Longer files are loaded up to that point, and the app says so.
+- Voice uploads up to 25 MB. PDFs: the first pages, up to eight.
+- Reading Urdu from a picture is about 95% accurate, not exact. Check names
+  and numbers.
+- Old `.doc` files are not read; save them as `.docx`.
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+MIT, as the project it is built on. See [LICENSE](LICENSE).

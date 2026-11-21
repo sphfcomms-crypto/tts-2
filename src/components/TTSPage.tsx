@@ -1,27 +1,21 @@
 "use client";
-import React, { useState } from "react";
-import {
-  getRandomLibrarySet,
-  getRandomVoice,
-  LIBRARY,
-  VOICES,
-} from "../lib/library";
+import React, { useEffect, useRef, useState } from "react";
+import { DEFAULT_SCRIPT } from "../lib/library";
+import { MAX_INPUT_LENGTH } from "@/lib/limits";
+import { kindOf, readTextFile, transcribeFile } from "@/lib/files";
+import { readImage, readPdf, readWord } from "@/lib/documents";
 import { Block } from "./ui/Block";
 import { Footer } from "./ui/Footer";
-
 import { Header } from "./ui/Header";
-import { DevMode } from "./ui/DevMode";
-
-import { Regenerate, Shuffle, Star } from "./ui/Icons";
 import { useBodyScrollable } from "@/hooks/useBodyScrollable";
-import { Button, ButtonLED } from "./ui/Button";
 import { appStore } from "@/lib/store";
-import BrowserNotSupported from "./ui/BrowserNotSupported";
-
-const EXPRESSIVE_VOICES = ["ash", "ballad", "coral", "sage", "verse"];
+import { toUrduScript } from "@/lib/script";
+import { needsUrduStep } from "@/lib/spoken";
+import { EngineStatus, refreshEngineStatus } from "./EngineStatus";
+import { LiveCall } from "./LiveCall";
+import { useLiveTranscribe } from "@/hooks/useLiveTranscribe";
 
 export default function TtsPage() {
-  const [devMode, setDevMode] = useState(false);
   const isScrollable = useBodyScrollable();
 
   return (
@@ -29,204 +23,232 @@ export default function TtsPage() {
       data-scrollable={isScrollable}
       className="flex flex-col gap-x-3 min-h-screen px-5 pt-6 pb-32 md:pb-24 selection:bg-primary/20"
     >
-      <Header devMode={devMode} setDevMode={setDevMode} />
-      {devMode ? <DevMode /> : <Board />}
-      <Footer devMode={devMode} />
+      <Header />
+      <Board />
+      <Footer />
     </div>
   );
 }
 
+// The page itself is only what is used every time: the script, and the
+// call. The voice, the vibe and the options live in the Settings menu.
 const Board = () => {
-  const voice = appStore.useState((state) => state.voice);
   const input = appStore.useState((state) => state.input);
   const inputDirty = appStore.useState((state) => state.inputDirty);
-  const prompt = appStore.useState((state) => state.prompt);
-  const selectedEntry = appStore.useState((state) => state.selectedEntry);
-  const librarySet = appStore.useState((state) => state.librarySet);
-  const browserNotSupported = appStore.useState(
-    () => !("serviceWorker" in navigator)
-  );
+  const urduMode = appStore.useState((state) => state.urduMode);
+  const styledText = appStore.useState((state) => state.styledText);
+  const showEngines = appStore.useState((state) => state.showEngines);
+  const [converting, setConverting] = useState(false);
+  const [reading, setReading] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
 
-  const handleRefreshLibrarySet = () => {
-    const nextSet = getRandomLibrarySet();
+  // Earlier versions used a service worker; remove it where it is still
+  // installed, so it cannot serve stale files.
+  useEffect(() => {
+    navigator.serviceWorker
+      ?.getRegistrations()
+      .then((list) => list.forEach((worker) => worker.unregister()))
+      .catch(() => {});
+  }, []);
 
-    appStore.setState((draft) => {
-      draft.librarySet = nextSet;
+  // Input file: a text file becomes the script as it is; a voice file is
+  // transcribed first.
+  const handleFile = async (file: File | undefined) => {
+    if (!file || reading) return;
+    const kind = kindOf(file);
+    if (kind === "other") {
+      alert(
+        "Use a text, Word or PDF file, a photo of a page, or a voice recording."
+      );
+      return;
+    }
 
-      // When the user has changes, don't update the script.
-      if (!draft.inputDirty) {
-        draft.input = nextSet[0].input;
+    setReading(true);
+    try {
+      let text: string;
+      let truncated = false;
+      if (kind === "text") {
+        text = await readTextFile(file);
+      } else if (kind === "word") {
+        ({ text, truncated } = await readWord(file));
+      } else if (kind === "pdf") {
+        ({ text, truncated } = await readPdf(file));
+      } else if (kind === "image") {
+        ({ text, truncated } = await readImage(file));
+      } else {
+        ({ text, truncated } = await transcribeFile(file));
       }
-
-      draft.prompt = nextSet[0].prompt;
-      draft.selectedEntry = nextSet[0];
-      draft.latestAudioUrl = null;
-    });
+      if (!text.trim()) {
+        alert("That file has no text in it.");
+        return;
+      }
+      if (text.length > MAX_INPUT_LENGTH - 1) {
+        truncated = true;
+        text = text.slice(0, MAX_INPUT_LENGTH - 1);
+      }
+      appStore.setState((draft) => {
+        draft.input = text;
+        draft.inputDirty = true;
+        draft.styledText = null;
+        draft.latestAudio = null;
+      });
+      if (truncated) {
+        alert(
+          `The file is longer than this app takes in one go. Only the first part was loaded (up to ${
+            MAX_INPUT_LENGTH - 1
+          } characters).`
+        );
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not read that file.");
+    } finally {
+      setReading(false);
+      refreshEngineStatus();
+    }
   };
 
-  const handlePresetSelect = (name: string) => {
-    const entry = LIBRARY[name];
+  // Live dictation: what is heard is added after the text that was in the
+  // script box when the microphone was switched on.
+  const dictationBase = useRef("");
+  const mic = useLiveTranscribe({
+    onTranscript: (heard) => {
+      appStore.setState((draft) => {
+        const base = dictationBase.current;
+        draft.input = [base, heard]
+          .filter(Boolean)
+          .join(" ")
+          .slice(0, MAX_INPUT_LENGTH - 1);
+        draft.inputDirty = true;
+        draft.latestAudio = null;
+      });
+    },
+    onError: (message) => alert(message),
+  });
+
+  // Show which engine took the microphone, and any failover afterwards.
+  useEffect(() => {
+    refreshEngineStatus();
+  }, [mic.status]);
+
+  const handleMicToggle = () => {
+    if (mic.status === "idle") {
+      // Replace the untouched sample script, but keep text the user wrote.
+      dictationBase.current = inputDirty ? input.trim() : "";
+      mic.start();
+    } else if (mic.status === "listening" || mic.status === "starting") {
+      mic.stop();
+    }
+  };
+
+  // Replaces the script with the Urdu text that will actually be spoken,
+  // so it can be read and corrected before Play.
+  const handleShowUrdu = async () => {
+    if (converting) return;
+    setConverting(true);
+    const original = appStore.getState().input;
+    const { text, ok } = await toUrduScript(original, true);
+    setConverting(false);
+    refreshEngineStatus();
+
+    if (!ok) {
+      alert("Could not convert the script to Urdu.");
+      return;
+    }
 
     appStore.setState((draft) => {
-      // When the user has changes, don't update the script.
-      if (!inputDirty) {
-        draft.input = entry.input;
-      }
-
-      draft.prompt = entry.prompt;
-      draft.selectedEntry = entry;
-      draft.latestAudioUrl = null;
+      // Leave the box alone if the script was edited while converting.
+      if (draft.input !== original) return;
+      draft.input = text;
+      draft.styledText = text;
+      draft.inputDirty = true;
+      draft.latestAudio = null;
     });
   };
 
   return (
     <main className="flex-1 flex flex-col gap-x-3 w-full max-w-(--page-max-width) mx-auto">
-      {browserNotSupported && (
-        <BrowserNotSupported
-          open={browserNotSupported}
-          onOpenChange={() => {}}
-        />
-      )}
-      <div className="flex flex-row">
-        <Block title="Voice">
-          <div className="grid grid-cols-12 gap-3">
-            {VOICES.map((newVoice) => (
-              <div
-                key={newVoice}
-                className="col-span-4 sm:col-span-3 md:col-span-2 xl:col-span-1 relative"
-              >
-                <Button
-                  block
-                  color="default"
-                  onClick={() => {
-                    appStore.setState((draft) => {
-                      draft.voice = newVoice;
-                      draft.latestAudioUrl = null;
-                    });
-                  }}
-                  selected={newVoice === voice}
-                  className="aspect-4/3 sm:aspect-2/1 lg:aspect-2.5/1 xl:aspect-square min-h-[60px] max-h-[100px] flex-col items-start justify-between relative"
-                >
-                  <span>
-                    {newVoice[0].toUpperCase()}
-                    {newVoice.substring(1)}
-                  </span>
-                  <div className="absolute left-[0.93rem] bottom-[0.93rem]">
-                    <ButtonLED />
-                  </div>
-                  {EXPRESSIVE_VOICES.includes(newVoice) && (
-                    <div className="absolute right-[13px] bottom-[10.5px]">
-                      <Star className="w-[12px] h-[12px]" />
-                    </div>
-                  )}
-                </Button>
-              </div>
-            ))}
-            <div className="col-span-4 sm:col-span-3 md:col-span-2 xl:col-span-1">
-              <Button
-                block
-                color="neutral"
-                onClick={() => {
-                  const randomVoice = getRandomVoice(voice);
-                  appStore.setState((draft) => {
-                    draft.voice = randomVoice;
-                    draft.latestAudioUrl = null;
-                  });
-                }}
-                className="aspect-4/3 sm:aspect-2/1 lg:aspect-2.5/1 xl:aspect-square max-h-[100px]"
-                aria-label="Select random voice"
-              >
-                <Shuffle />
-              </Button>
-            </div>
-          </div>
-        </Block>
-      </div>
-      <div className="flex flex-col md:flex-row gap-3">
-        <Block title="Vibe">
-          <div className="flex flex-col gap-3">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {librarySet.map((entry) => (
-                <Button
-                  key={entry.name}
-                  block
-                  color="default"
-                  onClick={() => handlePresetSelect(entry.name)}
-                  selected={selectedEntry?.name === entry.name}
-                  className="aspect-4/3 sm:aspect-2/1 lg:aspect-2.5/1 min-h-[60px] max-h-[100px] flex-col items-start justify-between relative"
-                >
-                  <span className="break-words pr-1">{entry.name}</span>
-                  <div className="absolute left-[0.93rem] bottom-[0.93rem]">
-                    <ButtonLED />
-                  </div>
-                </Button>
-              ))}
-              <Button
-                block
-                color="neutral"
-                onClick={handleRefreshLibrarySet}
-                className="aspect-4/3 sm:aspect-2/1 lg:aspect-2.5/1 min-h-[60px] max-h-[100px]"
-                aria-label="Generate new list of vibes"
-              >
-                <Regenerate />
-              </Button>
-            </div>
-            <textarea
-              id="input"
-              rows={8}
-              maxLength={999}
-              className="w-full resize-none outline-none focus:outline-none bg-screen p-4 rounded-lg shadow-textarea text-[16px] md:text-[14px]"
-              value={prompt}
-              onChange={({ target }) => {
-                appStore.setState((draft) => {
-                  draft.selectedEntry = null;
-                  draft.prompt = target.value;
-                  draft.latestAudioUrl = null;
-                });
-              }}
-              required
-            />
-          </div>
-        </Block>
-        <Block title="Script">
-          <div className="relative flex flex-col h-full w-full">
-            <textarea
-              id="prompt"
-              rows={8}
-              maxLength={999}
-              className="w-full h-full min-h-[220px] resize-none outline-none focus:outline-none bg-screen p-4 rounded-lg shadow-textarea text-[16px] md:text-[14px]"
-              value={input}
-              onChange={({ target }) => {
-                const nextValue = target.value;
+      <Block title="Script">
+        <div className="relative flex flex-col h-full w-full">
+          <textarea
+            id="prompt"
+            dir="auto"
+            rows={9}
+            maxLength={MAX_INPUT_LENGTH - 1}
+            className="w-full h-full min-h-[240px] resize-none outline-none focus:outline-none bg-screen p-4 pb-10 rounded-lg shadow-textarea text-[16px]"
+            value={input}
+            onChange={({ target }) => {
+              const nextValue = target.value;
 
+              appStore.setState((draft) => {
+                draft.inputDirty = !!nextValue && nextValue !== DEFAULT_SCRIPT;
+                draft.input = nextValue;
+                draft.latestAudio = null;
+              });
+            }}
+          />
+          {inputDirty && (
+            <span
+              className="absolute bottom-[-27px] sm:bottom-3 left-4 z-10 cursor-pointer uppercase hover:text-current/70 transition-colors"
+              onClick={() => {
                 appStore.setState((draft) => {
-                  draft.inputDirty =
-                    !!nextValue && selectedEntry?.input !== nextValue;
-                  draft.input = nextValue;
-                  draft.latestAudioUrl = null;
+                  draft.inputDirty = false;
+                  draft.input = DEFAULT_SCRIPT;
+                  draft.latestAudio = null;
                 });
               }}
-            />
-            {inputDirty && (
+            >
+              Reset
+            </span>
+          )}
+          <span className="absolute bottom-[-27px] sm:bottom-3 right-4 sm:right-16 z-10 flex gap-4 uppercase">
+            {needsUrduStep({ urduMode, input, styledText }) && (
               <span
-                className="absolute bottom-[-27px] sm:bottom-3 left-4 z-10 cursor-pointer uppercase hover:text-current/70 transition-colors"
-                onClick={() => {
-                  appStore.setState((draft) => {
-                    draft.inputDirty = false;
-                    draft.input = selectedEntry?.input ?? input;
-                    draft.latestAudioUrl = null;
-                  });
-                }}
+                className="cursor-pointer hover:text-current/70 transition-colors"
+                onClick={handleShowUrdu}
               >
-                Reset
+                {converting ? "Converting…" : "Show Urdu"}
               </span>
             )}
-            <span className="absolute bottom-3 right-4 z-10 opacity-30 hidden sm:block">
-              {input.length}
+            <span
+              className="cursor-pointer hover:text-current/70 transition-colors"
+              title="Load a text, Word or PDF file, a photo of a page, or a voice recording"
+              onClick={() => fileInput.current?.click()}
+            >
+              {reading ? "Reading…" : "Upload"}
             </span>
-          </div>
-        </Block>
-      </div>
+            <input
+              ref={fileInput}
+              type="file"
+              hidden
+              accept=".txt,.md,.srt,.vtt,text/plain,.docx,.doc,.pdf,application/pdf,image/*,audio/*,video/mp4,video/webm,.mp3,.wav,.m4a,.ogg,.opus,.flac,.aac,.amr"
+              onChange={({ target }) => {
+                handleFile(target.files?.[0]);
+                target.value = "";
+              }}
+            />
+            <span
+              className={`cursor-pointer hover:text-current/70 transition-colors ${
+                mic.status === "listening" ? "text-primary" : ""
+              }`}
+              title="Dictate the script with live transcription"
+              onClick={handleMicToggle}
+            >
+              {mic.status === "idle"
+                ? "Mic"
+                : mic.status === "starting"
+                ? "Starting…"
+                : mic.status === "listening"
+                ? "● Stop"
+                : "Finishing…"}
+            </span>
+          </span>
+          <span className="absolute bottom-3 right-4 z-10 opacity-30 hidden sm:block">
+            {input.length}
+          </span>
+        </div>
+      </Block>
+      <LiveCall />
+      {showEngines && <EngineStatus />}
     </main>
   );
 };

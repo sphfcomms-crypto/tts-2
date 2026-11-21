@@ -2,6 +2,7 @@ import { useAudioClip } from "@/hooks/useAudioClip";
 import clsx from "clsx";
 import { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import s from "./Button.module.css";
+import { appStore } from "@/lib/store";
 
 interface ButtonBaseProps {
   children: ReactNode;
@@ -41,7 +42,8 @@ export const Button = ({
   const playPressed = useAudioClip("/pressed.wav");
 
   const handleClick = (evt: MouseEvent) => {
-    if (!selected) {
+    // The click sound can be switched off in Settings.
+    if (!selected && appStore.getState().sounds) {
       playPressed();
     }
     onClick?.(evt);

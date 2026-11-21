@@ -10,19 +10,19 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://www.openai.fm'),
-  title: "OpenAI.fm",
+  metadataBase: new URL("http://localhost:3000"),
+  title: "TTS",
   description: "An interactive demo for developers to try the new text-to-speech model in the OpenAI API",
   authors: [{ name: "OpenAI" }],
   openGraph: {
-    title: "OpenAI.fm",
+    title: "TTS",
     description: "An interactive demo for developers to try the new text-to-speech model in the OpenAI API",
     images: [
       {
         url: "/og-image.png",
         width: 1200,
         height: 630,
-        alt: "OpenAI.fm, a text-to-speech demo",
+        alt: "TTS, a text-to-speech app",
       },
     ],
   },

@@ -7,7 +7,7 @@ const CSP = [
   "script-src 'self' 'unsafe-eval' 'unsafe-inline' ;",
   "connect-src 'self';",
   "style-src 'self' 'unsafe-inline';",
-  "img-src 'self'",
+  "img-src 'self';",
   "object-src 'none';",
   "frame-ancestors 'none';",
   IS_DEV ? null : "upgrade-insecure-requests;",
@@ -16,6 +16,9 @@ const CSP = [
   .join(" ");
 
 const nextConfig: NextConfig = {
+  // The production build goes to its own folder (NEXT_DIST_DIR=.next-prod),
+  // so building or running it never disturbs the development server.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   turbopack: {
     rules: {
       "*.svg": {

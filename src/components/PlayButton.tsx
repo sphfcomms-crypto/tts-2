@@ -2,10 +2,10 @@ import React, { useState, useRef } from "react";
 import { Play } from "./ui/Icons";
 import { Button } from "./ui/Button";
 import { appStore } from "@/lib/store";
+import { IS_BLINK, fetchSpeech, speechRequest } from "@/lib/files";
+import { refreshEngineStatus } from "./EngineStatus";
+import { StreamPlayer } from "@/lib/streamPlayer";
 import s from "./ui/Footer.module.css";
-
-const IS_SAFARI = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
 const PlayingWaveform = ({
   audioLoaded,
@@ -39,123 +39,121 @@ export default function PlayButton() {
   const [audioLoaded, setAudioLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRef = useRef<{ pause: () => void } | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const [amplitudeLevels, setAmplitudeLevels] = useState<number[]>(
     new Array(5).fill(0)
   );
   const amplitudeIntervalRef = useRef<number | null>(null);
-  const useStaticAnimation = IS_SAFARI || IS_IOS;
 
-  const generateRandomAmplitudes = () =>
-    Array(5)
-      .fill(0)
-      .map(() => Math.random() * 0.06);
+  const stopSampling = () => {
+    if (amplitudeIntervalRef.current !== null) {
+      clearInterval(amplitudeIntervalRef.current);
+      amplitudeIntervalRef.current = null;
+    }
+  };
 
   const handleSubmit = async () => {
-    const { input, prompt, voice } = appStore.getState();
-
     if (audioLoading) return;
 
     // toggle off if already playing
     if (audioRef.current) {
       if (isPlaying) {
         audioRef.current.pause();
+        audioRef.current = null;
         setIsPlaying(false);
         setAudioLoaded(false);
-        audioRef.current = null;
-        if (amplitudeIntervalRef.current) {
-          clearInterval(amplitudeIntervalRef.current);
-          amplitudeIntervalRef.current = null;
-        }
+        stopSampling();
       }
       return;
     }
 
     setAudioLoading(true);
-    appStore.setState({ latestAudioUrl: null });
+    stopSampling();
 
-    try {
-      const url = new URL("/api/generate", window.location.origin);
-      url.searchParams.append("input", input);
-      url.searchParams.append("prompt", prompt);
-      url.searchParams.append("voice", voice);
-      url.searchParams.append("generation", crypto.randomUUID());
-      const audioUrl = url.toString();
-      appStore.setState({ latestAudioUrl: audioUrl });
+    const onError = (err?: unknown) => {
+      if (err) console.error("Error playing speech:", err);
+      audioRef.current = null;
+      setAudioLoading(false);
+      setAudioLoaded(false);
+      setIsPlaying(false);
+      refreshEngineStatus();
+      alert("Error generating audio");
+    };
 
-      // reset any old sampler
-      if (amplitudeIntervalRef.current !== null) {
-        clearInterval(amplitudeIntervalRef.current);
-        amplitudeIntervalRef.current = null;
-      }
-
-      const audio = new Audio();
-      audio.preload = "none";
-      audioRef.current = audio;
-
-      // for non‑iOS/Safari, hook up WebAudio analyzer
-      if (!useStaticAnimation) {
-        if (!audioContextRef.current) {
-          audioContextRef.current = new AudioContext();
-        }
-        const ctx = audioContextRef.current;
-        const source = ctx.createMediaElementSource(audio);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
-        analyser.connect(ctx.destination);
-        analyserRef.current = analyser;
-      }
-
-      const sample = () => {
-        if (useStaticAnimation) {
-          setAmplitudeLevels(generateRandomAmplitudes());
+    const onPlay = () => {
+      refreshEngineStatus();
+      amplitudeIntervalRef.current = window.setInterval(() => {
+        if (!analyserRef.current) {
+          // No level meter on this browser: just keep the bars moving.
+          setAmplitudeLevels(
+            Array.from({ length: 5 }, () => Math.random() * 0.06)
+          );
           return;
         }
-        if (!analyserRef.current) return;
         const data = new Uint8Array(analyserRef.current.fftSize);
         analyserRef.current.getByteTimeDomainData(data);
         const avg =
           data.reduce((sum, v) => sum + Math.abs(v - 128), 0) /
           analyserRef.current.fftSize;
-        const amp = avg / 128;
-        setAmplitudeLevels((prev) => [...prev.slice(1), amp]);
-      };
-
-      audio.onerror = () => {
-        setAudioLoading(false);
-        setAudioLoaded(false);
-        setIsPlaying(false);
-        alert("Error generating audio");
-      };
-
-      audio.onplay = () => {
-        amplitudeIntervalRef.current = window.setInterval(sample, 100);
-        setIsPlaying(true);
-        setAudioLoaded(true);
-        setAudioLoading(false);
-      };
-
-      const clearSampling = () => {
-        audioRef.current = null;
-        if (amplitudeIntervalRef.current !== null) {
-          clearInterval(amplitudeIntervalRef.current);
-          amplitudeIntervalRef.current = null;
-        }
-        setIsPlaying(false);
-      };
-
-      audio.onpause = clearSampling;
-      audio.onended = clearSampling;
-      audio.autoplay = true;
-      audio.src = audioUrl;
-    } catch (err) {
-      console.error("Error generating speech:", err);
+        setAmplitudeLevels((prev) => [...prev.slice(1), avg / 128]);
+      }, 100);
+      setIsPlaying(true);
+      setAudioLoaded(true);
       setAudioLoading(false);
-      setAudioLoaded(false);
+    };
+
+    const onEnded = () => {
+      audioRef.current = null;
+      stopSampling();
       setIsPlaying(false);
+    };
+
+    try {
+      // A clip made earlier for the same script and settings is replayed.
+      const ready = appStore.getState().latestAudio;
+
+      if (IS_BLINK && !ready) {
+        // Play each chunk as it arrives, and keep the clip for the Voice
+        // file button.
+        if (!audioContextRef.current) {
+          audioContextRef.current = new AudioContext();
+        }
+        const ctx = audioContextRef.current;
+        await ctx.resume();
+        const { init } = await speechRequest();
+        const player = new StreamPlayer(ctx);
+        analyserRef.current = player.analyser;
+        audioRef.current = player;
+        player.onplay = onPlay;
+        player.onended = onEnded;
+        player.onerror = onError;
+        player.onaudio = (wav) => appStore.setState({ latestAudio: wav });
+        player.start("/api/generate", init);
+        return;
+      }
+
+      // Other browsers, and replays: the whole clip in an <audio> element.
+      let clip = ready;
+      if (!clip) {
+        clip = await fetchSpeech((await speechRequest()).init);
+        appStore.setState({ latestAudio: clip });
+      }
+      const url = URL.createObjectURL(clip);
+      const audio = new Audio(url);
+      analyserRef.current = null;
+      audioRef.current = audio;
+      audio.onplay = onPlay;
+      audio.onerror = () => onError();
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        onEnded();
+      };
+      audio.onpause = onEnded;
+      await audio.play();
+    } catch (err) {
+      onError(err);
     }
   };
 
