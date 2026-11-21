@@ -1,126 +1,115 @@
 import { Candidate, EngineError } from "./core";
-import { OPENAI_BASE, canUse, failed, openaiHeaders } from "./engines";
+import { canUse } from "./engines";
+import { callTool } from "./responses";
 
-// Chat models that can do the Roman Urdu rewrite, best first for this job:
-// fast, cheap models that write Urdu well, then bigger ones as backup.
-const TEXT_MODELS = [
-  "gpt-4.1-mini",
-  "gpt-4o-mini",
-  "gpt-5.4-mini",
-  "gpt-4.1",
-  "gpt-4o",
-  "gpt-5-mini",
-];
+// Text work (the Urdu rewrite, script conversion) and reading pages, done by
+// the gpt-6.2 models through tool calls.
 
-// Models trusted to read a picture of a page. Only these: measured on Urdu
-// Nastaliq pages, gpt-4.1-mini got 95 to 100% of the words right, while
-// gpt-4o-mini, gpt-4o, gpt-4.1, gpt-5.4-mini and gpt-5.4 made up sentences
-// (16 to 90%). A wrong reader is worse than none, so there is no wider
-// fallback here.
-const PAGE_READERS = ["gpt-4.1-mini", "gpt-4.1-mini-2025-04-14"];
+// The 6.2 reasoning models, fastest tier first. Only the ones the API key
+// actually has are used; when this was written that was gpt-6.2-sol alone.
+const TEXT_MODELS = ["gpt-6.2-luna", "gpt-6.2-terra", "gpt-6.2-sol"];
 
-const TIMEOUT_MS = 30_000;
-const PAGE_TIMEOUT_MS = 90_000;
+// Readers of page pictures, best first. Measured on seven damaged Urdu
+// pages (blurred, faded, torn, photographed at an angle, low resolution),
+// words found on average: gpt-6.2-sol 83%, gpt-6.2-astra 75%, gpt-6.1-terra
+// 62%. Those three also say honestly when a page is hard or unreadable.
+// gpt-4.1-mini is left out on purpose: it found 54%, made up the rest and
+// called every page "clear".
+const PAGE_READERS = ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-terra"];
 
-// Reasoning models reject a custom temperature and are slow unless told to
-// think little; the older chat models take a temperature instead.
-const isReasoningModel = (model: string) => /^(gpt-[5-9]|o\d)/.test(model);
+const SAVE_TEXT = {
+  name: "save_text",
+  description: "Saves the finished text.",
+  parameters: {
+    type: "object",
+    properties: {
+      text: { type: "string", description: "The finished text." },
+    },
+    required: ["text"],
+    additionalProperties: false,
+  },
+};
 
-type Part =
-  | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string; detail: "high" } };
+const SAVE_PAGE = {
+  name: "save_page_text",
+  description: "Saves the text read from the page.",
+  parameters: {
+    type: "object",
+    properties: {
+      text: { type: "string", description: "The text of the page." },
+      legibility: {
+        type: "string",
+        enum: ["clear", "hard", "unreadable"],
+        description:
+          "clear: every word could be read with confidence. hard: some words were guessed from their shape or the sentence, or could not be read. unreadable: most of the page could not be read.",
+      },
+    },
+    required: ["text", "legibility"],
+    additionalProperties: false,
+  },
+};
 
-async function complete(
-  model: string,
-  system: string,
-  user: string | Part[],
-  temperature = 0.4,
-  timeoutMs = TIMEOUT_MS
-): Promise<string> {
-  const body: Record<string, unknown> = {
-    model,
-    response_format: { type: "json_object" },
-    messages: [
-      ...(system ? [{ role: "system", content: system }] : []),
-      { role: "user", content: user },
-    ],
-    ...(isReasoningModel(model)
-      ? { reasoning_effort: "low" }
-      : { temperature }),
-  };
+export type Legibility = "clear" | "hard" | "unreadable";
+export type PageReading = { text: string; legibility: Legibility };
 
-  const send = () =>
-    fetch(`${OPENAI_BASE}/chat/completions`, {
-      method: "POST",
-      headers: { ...openaiHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-  let res = await send();
-
-  // A model that refuses one of the tuning knobs still gets a plain try.
-  if (res.status === 400) {
-    const text = await res.clone().text();
-    if (/temperature|reasoning_effort/.test(text)) {
-      delete body.temperature;
-      delete body.reasoning_effort;
-      res = await send();
-    }
-  }
-
-  if (!res.ok) await failed(res, model);
-
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== "string" || !content.trim()) {
-    throw new EngineError(`${model} returned no text`);
-  }
-  return content;
-}
-
-// `accept` checks and unpacks the model's answer; throwing there makes the
-// router move on to the next model, so a bad answer is never returned.
+// `accept` checks the model's text; throwing there makes the router move on
+// to the next model, so a bad answer is never returned.
 export function textCandidates<T>(
   system: string,
   user: string,
-  accept: (content: string) => T
+  accept: (text: string) => T
 ): Candidate<T>[] {
-  const override = process.env.OPENAI_TEXT_MODEL;
-  const models = override
-    ? [override, ...TEXT_MODELS.filter((m) => m !== override)]
-    : TEXT_MODELS;
-
-  return models.map((model) => ({
+  return TEXT_MODELS.map((model) => ({
     id: `text:${model}`,
     label: model,
     available: () => canUse(model),
-    run: async () => accept(await complete(model, system, user)),
+    run: async () => {
+      const { text } = await callTool<{ text?: unknown }>({
+        model,
+        instructions: `${system}\n\nGive the result by calling the save_text tool.`,
+        input: user,
+        tool: SAVE_TEXT,
+      });
+      if (typeof text !== "string" || !text.trim()) {
+        throw new EngineError(`${model} returned no text`);
+      }
+      return accept(text.trim());
+    },
   }));
 }
 
-// Reads the text off a picture of a page (a data: URL of a JPEG or PNG).
+// Reads the text off pictures of one page (data: URLs).
 export function pageCandidates<T>(
   instructions: string,
-  imageUrl: string,
-  accept: (content: string) => T
+  imageUrls: string[],
+  accept: (reading: PageReading) => T
 ): Candidate<T>[] {
   return PAGE_READERS.map((model) => ({
     id: `read:${model}`,
     label: model,
     available: () => canUse(model),
-    run: async () =>
-      accept(
-        await complete(
-          model,
-          "",
-          [
-            { type: "text", text: instructions },
-            { type: "image_url", image_url: { url: imageUrl, detail: "high" } },
-          ],
-          0,
-          PAGE_TIMEOUT_MS
-        )
-      ),
+    run: async () => {
+      const reading = await callTool<Partial<PageReading>>({
+        model,
+        input: [
+          { type: "input_text", text: instructions },
+          ...imageUrls.map((image_url) => ({
+            type: "input_image" as const,
+            image_url,
+            detail: "high" as const,
+          })),
+        ],
+        tool: SAVE_PAGE,
+        timeoutMs: 120_000,
+      });
+      if (typeof reading.text !== "string") {
+        throw new EngineError(`${model} returned no page text`);
+      }
+      const legibility: Legibility =
+        reading.legibility === "clear" || reading.legibility === "unreadable"
+          ? reading.legibility
+          : "hard";
+      return accept({ text: reading.text.trim(), legibility });
+    },
   }));
 }

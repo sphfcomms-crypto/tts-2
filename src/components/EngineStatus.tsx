@@ -9,6 +9,7 @@ type Job = {
 type Status = {
   key: boolean;
   text: Job;
+  read: Job;
   speech: Job;
   transcribe: Job;
   call: Job;
@@ -20,10 +21,11 @@ export const refreshEngineStatus = () =>
   window.dispatchEvent(new Event("router-refresh"));
 
 const JOBS: {
-  key: "text" | "speech" | "transcribe" | "call";
+  key: "text" | "read" | "speech" | "transcribe" | "call";
   name: string;
 }[] = [
   { key: "text", name: "Text" },
+  { key: "read", name: "Pages" },
   { key: "speech", name: "Voice" },
   { key: "transcribe", name: "Mic" },
   { key: "call", name: "Call" },

@@ -12,7 +12,8 @@ import { overLimit } from "@/lib/usage";
 // Urdu script out. The speech model reads Latin letters with an English
 // accent, so the text is rewritten in Urdu script (with a young woman's
 // grammar and natural interjections) before it is sent to /api/generate.
-// The router picks the chat model and fails over between models.
+// The router picks the gpt-6.2 model, which hands the text back through a
+// tool call, and fails over between models.
 
 // A long script is rewritten a piece at a time: the model keeps to the
 // text better on a paragraph than on a page.
@@ -41,9 +42,7 @@ Rewrite it so it can be spoken naturally:
    - … for hesitation, trailing off, or a beat before a surprise;
    - split run-on text into short spoken sentences, and start a new paragraph when the topic or the mood changes.
 8. Make it sound like a real person talking: add small natural interjections and fillers where they fit (ارے، اُف، ہائے، ہممم، اچھا، یار، نا، اوہو، ہاہا), at most about one per sentence. Match the emotion already in the text; do not invent a different mood.
-9. Stay under 900 characters.
-
-Reply with JSON only: {"urdu": "<the rewritten text>"}`;
+9. Stay under 900 characters.`;
 
 const cache = new Map<string, string>();
 

@@ -31,10 +31,12 @@ async function speak(
   const ua = userAgent(req);
   const format = ua.engine?.name === "Blink" ? "wav" : "mp3";
 
-  // Truncate input and prompt to max 1000 characters
-  // Frontend handles this, but we'll do it here too
-  // to avoid extra requests to the server
-  const input = params.input.slice(0, MAX_INPUT_LENGTH);
+  // The frontend keeps to the length limit, but it is applied here too.
+  // […] marks a word that could not be read off a damaged page: the voice
+  // pauses there instead of trying to say it.
+  const input = params.input
+    .slice(0, MAX_INPUT_LENGTH)
+    .replaceAll("[…]", "…");
   const { voice, vibe } = params;
 
   // Every vibe is spoken by a young woman, whatever its own instructions

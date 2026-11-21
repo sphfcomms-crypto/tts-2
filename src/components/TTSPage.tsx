@@ -67,19 +67,24 @@ const Board = () => {
     try {
       let text: string;
       let truncated = false;
+      let gaps: boolean | undefined = false;
       if (kind === "text") {
         text = await readTextFile(file);
       } else if (kind === "word") {
         ({ text, truncated } = await readWord(file));
       } else if (kind === "pdf") {
-        ({ text, truncated } = await readPdf(file));
+        ({ text, truncated, gaps } = await readPdf(file));
       } else if (kind === "image") {
-        ({ text, truncated } = await readImage(file));
+        ({ text, truncated, gaps } = await readImage(file));
       } else {
         ({ text, truncated } = await transcribeFile(file));
       }
-      if (!text.trim()) {
-        alert("That file has no text in it.");
+      if (!text.replaceAll("[…]", "").trim()) {
+        alert(
+          gaps
+            ? "That page is too blurred or damaged to read. Try a sharper, closer photo."
+            : "That file has no text in it."
+        );
         return;
       }
       if (text.length > MAX_INPUT_LENGTH - 1) {
@@ -92,6 +97,11 @@ const Board = () => {
         draft.styledText = null;
         draft.latestAudio = null;
       });
+      if (gaps) {
+        alert(
+          "Some words on the page could not be read. They are marked […] in the script."
+        );
+      }
       if (truncated) {
         alert(
           `The file is longer than this app takes in one go. Only the first part was loaded (up to ${

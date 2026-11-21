@@ -2,7 +2,7 @@ import { callCandidates } from "@/lib/router/call";
 import { describe } from "@/lib/router/core";
 import { hasOpenAI } from "@/lib/router/engines";
 import { speechEngines } from "@/lib/router/speech";
-import { textCandidates } from "@/lib/router/text";
+import { pageCandidates, textCandidates } from "@/lib/router/text";
 import { clipCandidates, realtimeCandidates } from "@/lib/router/transcribe";
 
 // What the router would pick right now for each job, and the state of
@@ -18,8 +18,9 @@ const noHandlers = {
 };
 
 export async function GET() {
-  const [text, speech, transcribe, call] = await Promise.all([
+  const [text, read, speech, transcribe, call] = await Promise.all([
     describe("text", textCandidates("", "", (content) => content)),
+    describe("read", pageCandidates("", [], (reading) => reading)),
     describe(
       "speech",
       speechEngines({ input: "", prompt: "", voice: "coral", format: "pcm" })
@@ -35,7 +36,7 @@ export async function GET() {
   ]);
 
   return Response.json(
-    { key: hasOpenAI(), text, speech, transcribe, call },
+    { key: hasOpenAI(), text, read, speech, transcribe, call },
     { headers: { "Cache-Control": "no-store" } }
   );
 }

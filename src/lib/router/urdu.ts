@@ -7,17 +7,9 @@ const DEVANAGARI = /[ऀ-ॿ]/;
 
 export const hasDevanagari = (text: string) => DEVANAGARI.test(text);
 
-// Unpacks and checks a model's {"urdu": …} answer. Throwing sends the router
-// on to the next model, so empty, Roman or Devanagari output is never used.
-export function acceptUrdu(content: string): string {
-  // Models sometimes wrap the JSON in a code fence or add a stray sentence.
-  const start = content.indexOf("{");
-  const end = content.lastIndexOf("}");
-  let urdu = "";
-  try {
-    const parsed = JSON.parse(content.slice(start, end + 1));
-    urdu = typeof parsed.urdu === "string" ? parsed.urdu.trim() : "";
-  } catch {}
+// Checks the Urdu text a model saved. Throwing sends the router on to the
+// next model, so empty, Roman or Devanagari output is never used.
+export function acceptUrdu(urdu: string): string {
   if (!urdu || urduShare(urdu) < 0.6 || hasDevanagari(urdu)) {
     throw new EngineError("unusable Urdu text in the answer");
   }
@@ -32,9 +24,7 @@ Change the script only:
 1. Write every word in Urdu (Arabic) script with standard Urdu spelling.
 2. Same words, same order, same meaning. Do not translate, correct, add or remove anything.
 3. English words that were spoken stay as they are, written in Urdu script as pronounced (वेट → ویٹ, ऑफिस → آفس, टेंशन → ٹینشن).
-4. Use Urdu punctuation (۔ ؟ ،).
-
-Reply with JSON only: {"urdu": "<the converted text>"}`;
+4. Use Urdu punctuation (۔ ؟ ،).`;
 
 const cache = new Map<string, string>();
 

@@ -8,7 +8,8 @@ import { MAX_INPUT_LENGTH } from "./limits";
 // and read by a vision model on the server, because the text stored in an
 // Urdu PDF has the letters of every word in a scrambled order.
 
-type Result = { text: string; truncated: boolean };
+// gaps: some words could not be read off the page and are marked […].
+type Result = { text: string; truncated: boolean; gaps?: boolean };
 
 const MAX_PAGES = 8; // the server takes this many pictures per request
 const PAGE_WIDTH = 1400; // pixels: wide enough for small Nastaliq to be read
@@ -46,8 +47,11 @@ const toJpeg = (canvas: HTMLCanvasElement) =>
 // A photo or scan of a page.
 export async function readImage(file: File): Promise<Result> {
   // Shrink very large photos: more pixels than this do not help the reader.
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+  // (A small photo goes as it is; the server enlarges it.)
+  const bitmap = await createImageBitmap(file, {
+    imageOrientation: "from-image",
+  });
+  const scale = Math.min(1, 2400 / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);
@@ -56,8 +60,8 @@ export async function readImage(file: File): Promise<Result> {
   const form = new FormData();
   form.append("page", await toJpeg(canvas), "page.jpg");
   form.append("layer", "");
-  const { pages } = await post(form);
-  return limit(String(pages?.[0] ?? "").trim());
+  const { pages, gaps } = await post(form);
+  return { ...limit(String(pages?.[0] ?? "").trim()), gaps: gaps === true };
 }
 
 export async function readPdf(file: File): Promise<Result> {
@@ -116,15 +120,17 @@ export async function readPdf(file: File): Promise<Result> {
       if (ready >= MAX_INPUT_LENGTH) break;
     }
 
+    let gaps = false;
     if (pictured.length) {
-      const { pages } = await post(form);
+      const { pages, gaps: unread } = await post(form);
+      gaps = unread === true;
       pictured.forEach((slot, i) => {
         texts[slot] = String(pages?.[i] ?? "").trim();
       });
     }
 
     const text = texts.filter(Boolean).join("\n\n").trim();
-    const result = limit(text);
+    const result: Result = { ...limit(text), gaps };
     // Pages that were never opened also count as "there was more".
     if (pdf.numPages > texts.length) result.truncated = true;
     return result;

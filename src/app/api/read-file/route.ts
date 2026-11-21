@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { mapLimit } from "@/lib/chunks";
 import { docxText } from "@/lib/docx";
 import { MAX_INPUT_LENGTH, MAX_UPLOAD_BYTES } from "@/lib/limits";
+import { preparePage } from "@/lib/pageImages";
 import { EngineError, route } from "@/lib/router/core";
 import { hasOpenAI } from "@/lib/router/engines";
 import { pageCandidates } from "@/lib/router/text";
@@ -11,13 +12,18 @@ import { overLimit } from "@/lib/usage";
 //
 //   POST /api/read-file   (multipart form)
 //     file = a Word file (.docx)                 -> { text }
-//     page = pictures of pages, one or more      -> { pages: [text, …] }
+//     page = pictures of pages, one or more      -> { pages: [text, …], gaps }
 //     layer = for each page, the text stored in the PDF for it (may be "")
 //
 // Word files are unpacked here. PDFs and photos arrive as pictures of their
-// pages (the browser renders the PDF) and are read by a vision model: the
-// text stored inside an Urdu PDF has its letters in a scrambled order, so it
-// cannot be used as the text, only to check the reading against.
+// pages (the browser renders the PDF) and are read by a gpt-6.2 vision
+// model: the text stored inside an Urdu PDF has its letters in a scrambled
+// order, so it cannot be used as the text, only to check the reading against.
+//
+// A scan or a photo may be old, torn, faded or blurred, so it is prepared
+// first (see pageImages.ts) and the reader marks every word it cannot make
+// out with […] instead of guessing. `gaps` is true when any page has such
+// marks or could not be read at all.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,9 +31,15 @@ export const maxDuration = 300;
 
 const MAX_PAGES = 8;
 const MAX_PAGE_BYTES = 4 * 1024 * 1024;
+const GAP = "[…]"; // stands where a word could not be read
 
-const READ_PAGE = `This is a picture of one page of a document. Copy out its text exactly as written, in the same language and script, in reading order (Urdu and Arabic read right to left). Do not translate, summarise, correct or comment. Leave out page numbers, running headers and footers. Put a blank line between paragraphs. If the page has no text, use an empty string.
-Reply with JSON only: {"text": "<the text of the page>"}`;
+const COPY_RULES = `Copy out its text exactly as written, in the same language and script, in reading order (Urdu and Arabic read right to left). Do not translate, summarise, correct or comment. Leave out page numbers, running headers and footers. Put a blank line between paragraphs. If the page has no text, use an empty string. Give the result by calling the save_page_text tool.`;
+
+// A page drawn from a PDF's own text: always sharp.
+const READ_CLEAN_PAGE = `This is a picture of one page of a document. ${COPY_RULES}`;
+
+// A scan or a photo of paper.
+const READ_PAPER_PAGE = `The two pictures show the same page of a document: first as it was scanned or photographed, then after cleaning. The page may be damaged: blurred, faded, stained, torn, creased or photographed at an angle. Use whichever picture shows each word more clearly, and write the page once. Use the shape of each word and the sense of the sentence to make out words that are hard to see, but never invent text: where a word is torn away or cannot be read at all, write ${GAP} in its place. ${COPY_RULES}`;
 
 const LETTER = /[؀-ۿA-Za-z]/g;
 
@@ -57,31 +69,38 @@ function sameLetters(a: string, b: string): number {
   return shared / Math.max(1, totalA, totalB);
 }
 
-function pageText(content: string): string {
-  const start = content.indexOf("{");
-  const end = content.lastIndexOf("}");
-  try {
-    const parsed = JSON.parse(content.slice(start, end + 1));
-    if (typeof parsed.text === "string") return parsed.text.trim();
-  } catch {}
-  throw new EngineError("the page reader gave no text");
-}
+type Page = { text: string; gaps: boolean };
 
-async function readPage(image: File, layer: string): Promise<string> {
+async function readPage(image: File, layer: string): Promise<Page> {
   const bytes = Buffer.from(await image.arrayBuffer());
-  const url = `data:${image.type || "image/jpeg"};base64,${bytes.toString("base64")}`;
-  const check = (layer.match(LETTER) ?? []).length >= 40;
+  // Enough stored letters means the page was drawn from the PDF's own text.
+  const drawn = (layer.match(LETTER) ?? []).length >= 40;
+
+  let pictures: string[];
+  try {
+    pictures = drawn
+      ? [`data:${image.type || "image/jpeg"};base64,${bytes.toString("base64")}`]
+      : await preparePage(bytes);
+  } catch {
+    throw new EngineError("That picture could not be opened.", 415);
+  }
 
   const { value } = await route(
     "read",
-    pageCandidates(READ_PAGE, url, (content) => {
-      const text = pageText(content);
-      if (check && sameLetters(layer, text) < 0.9) {
-        // Not the letters that are on the page: do not trust this reading.
-        throw new EngineError("the reading does not match the page");
+    pageCandidates(
+      drawn ? READ_CLEAN_PAGE : READ_PAPER_PAGE,
+      pictures,
+      ({ text, legibility }) => {
+        if (drawn && sameLetters(layer, text.replaceAll(GAP, "")) < 0.9) {
+          // Not the letters that are on the page: do not trust this reading.
+          throw new EngineError("the reading does not match the page");
+        }
+        return {
+          text,
+          gaps: legibility === "unreadable" || text.includes(GAP),
+        };
       }
-      return text;
-    })
+    )
   );
   return value;
 }
@@ -140,10 +159,13 @@ export async function POST(req: NextRequest) {
   if (limited) return limited;
 
   try {
-    const texts = await mapLimit(pages, 3, (page, i) =>
+    const read = await mapLimit(pages, 3, (page, i) =>
       readPage(page, layers[i] ?? "")
     );
-    return Response.json({ pages: texts });
+    return Response.json({
+      pages: read.map((page) => page.text),
+      gaps: read.some((page) => page.gaps),
+    });
   } catch (err) {
     console.error("Could not read the uploaded pages:", err);
     return new Response("Could not read that document.", {
