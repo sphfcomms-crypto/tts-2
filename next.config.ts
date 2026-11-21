@@ -5,9 +5,14 @@ const IS_DEV = process.env.NODE_ENV !== "production";
 const CSP = [
   "default-src 'self';",
   "script-src 'self' 'unsafe-eval' 'unsafe-inline' ;",
-  "connect-src 'self';",
+  // blob: the avatar's textures are unpacked from its model file in memory,
+  // and a clip that is replayed is held in memory too.
+  // The avatar's GPU box hands her video to the browser directly, through
+  // its own tunnel address (it changes every time the box starts).
+  "connect-src 'self' blob: https://*.trycloudflare.com;",
+  "media-src 'self' blob:;",
   "style-src 'self' 'unsafe-inline';",
-  "img-src 'self';",
+  "img-src 'self' blob: data:;",
   "object-src 'none';",
   "frame-ancestors 'none';",
   IS_DEV ? null : "upgrade-insecure-requests;",

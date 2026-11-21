@@ -18,9 +18,10 @@ SSH=(ssh -i "$SSH_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=
 
 echo "==> Packing the code"
 PACK="$(mktemp -d)/tts-app.tar.gz"
-# Everything git tracks or would track; never .env, builds, packages or samples.
+# Everything git tracks or would track; never .env, builds, packages, samples
+# or the avatar's build and GPU-box files (the site only needs public/avatar).
 git ls-files -co --exclude-standard -z \
-  | grep -zvE '^(samples/|deploy/|run-prod\.bat$)' \
+  | grep -zvE '^(samples/|deploy/|avatar-build/|avatar-gpu/|run-prod\.bat$)' \
   | tar -czf "$PACK" --null -T -
 echo "    $(du -h "$PACK" | cut -f1)"
 
@@ -29,7 +30,7 @@ scp -i "$SSH_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -q "$PACK" "$SERVER:/tm
 scp -i "$SSH_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -q deploy/remote-setup.sh "$SERVER:/tmp/tts-remote-setup.sh"
 if [ "${1:-}" = "--with-env" ]; then
   # Only the settings the server needs; dev-only lines stay on this PC.
-  grep -E '^(OPENAI_API_KEY|APP_PASSWORD|LIMIT_[A-Z_]*|USAGE_LIMITS|CALL_MAX_MINUTES|OPENAI_TRANSCRIBE_LANGUAGES)=' .env \
+  grep -E '^(OPENAI_API_KEY|AVATAR_GPU_KEY|APP_PASSWORD|LIMIT_[A-Z_]*|USAGE_LIMITS|CALL_MAX_MINUTES|OPENAI_TRANSCRIBE_LANGUAGES)=' .env \
     | "${SSH[@]}" "umask 077 && cat > /tmp/tts.env"
   echo "    .env uploaded"
 fi

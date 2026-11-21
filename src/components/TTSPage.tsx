@@ -13,6 +13,8 @@ import { toUrduScript } from "@/lib/script";
 import { needsUrduStep } from "@/lib/spoken";
 import { EngineStatus, refreshEngineStatus } from "./EngineStatus";
 import { LiveCall } from "./LiveCall";
+import { avatarBus } from "@/lib/avatar/bus";
+import { AvatarPanel } from "./AvatarPanel";
 import { useLiveTranscribe } from "@/hooks/useLiveTranscribe";
 
 export default function TtsPage() {
@@ -38,6 +40,7 @@ const Board = () => {
   const urduMode = appStore.useState((state) => state.urduMode);
   const styledText = appStore.useState((state) => state.styledText);
   const showEngines = appStore.useState((state) => state.showEngines);
+  const showAvatar = appStore.useState((state) => state.avatar);
   const [converting, setConverting] = useState(false);
   const [reading, setReading] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -140,6 +143,14 @@ const Board = () => {
     refreshEngineStatus();
   }, [mic.status]);
 
+  // While the microphone is taking dictation, the avatar listens.
+  useEffect(() => {
+    if (mic.status === "listening") {
+      avatarBus.setMood("listening");
+      return () => avatarBus.setMood("idle");
+    }
+  }, [mic.status]);
+
   const handleMicToggle = () => {
     if (mic.status === "idle") {
       // Replace the untouched sample script, but keep text the user wrote.
@@ -177,6 +188,7 @@ const Board = () => {
 
   return (
     <main className="flex-1 flex flex-col gap-x-3 w-full max-w-(--page-max-width) mx-auto">
+      {showAvatar && <AvatarPanel />}
       <Block title="Script">
         <div className="relative flex flex-col h-full w-full">
           <textarea

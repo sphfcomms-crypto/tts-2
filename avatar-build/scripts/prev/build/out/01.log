@@ -1,0 +1,42 @@
+00:00.087  system.path      | WARNING Could not get a list of mounted file-systems
+00:39.936  system.path      | WARNING Could not get a list of mounted file-systems
+[INFO ] services.locationservice ...............: Not adding link to MakeHuman user data, since neither explicit path nor auto-discovery is set in preferences.
+[INFO ] mpfb.init ..............................: Build info 20261121
+[INFO ] mpfb.init ..............................: Online access preference is not enabled. Not checking if MakeHuman is online.
+[INFO ] mpfb.init ..............................: MPFB initialization has finished.
+BASEMESH Body 19158
+KEYS before bake 57
+FACE KEYS 67
+HEIGHT native 1.5267013 scale 1.0480112
+RIG Armature 52
+ADDED Eyes Body.high-poly 1064
+ADDED Teeth Body.teeth_base 3868
+ADDED Tongue Body.tongue01 226
+ADDED Eyebrows Body.mindfront_eyebrows_05 21468
+ADDED Eyelashes Body.mindfront_eyelashes_02 16992
+CHILD KEYS Eyes 8 ['ARMATURE'] ['mixamorig:Head']
+CHILD KEYS Teeth 12 ['ARMATURE'] ['mixamorig:Head']
+CHILD KEYS Tongue 13 ['ARMATURE'] ['mixamorig:Head']
+CHILD KEYS Eyebrows 47 ['ARMATURE'] ['mixamorig:Head']
+CHILD KEYS Eyelashes 28 ['ARMATURE'] ['mixamorig:Head']
+SKIN (2048, 2048)
+EYE faces 1020 transparent 490
+TRIS Eyebrows 35334
+TRIS Eyelashes 25488
+BONES ['mixamorig:Hips', 'mixamorig:LeftUpLeg', 'mixamorig:LeftLeg', 'mixamorig:LeftFoot', 'mixamorig:LeftToeBase', 'mixamorig:RightUpLeg', 'mixamorig:RightLeg', 'mixamorig:RightFoot', 'mixamorig:RightToeBase', 'mixamorig:Spine', 'mixamorig:Spine1', 'mixamorig:Spine2', 'mixamorig:LeftShoulder', 'mixamorig:LeftArm', 'mixamorig:LeftForeArm', 'mixamorig:LeftHand', 'mixamorig:LeftHandIndex1', 'mixamorig:LeftHandIndex2', 'mixamorig:LeftHandIndex3', 'mixamorig:LeftHandMiddle1', 'mixamorig:LeftHandMiddle2', 'mixamorig:LeftHandMiddle3', 'mixamorig:LeftHandPinky1', 'mixamorig:LeftHandPinky2', 'mixamorig:LeftHandPinky3', 'mixamorig:LeftHandRing1', 'mixamorig:LeftHandRing2', 'mixamorig:LeftHandRing3', 'mixamorig:LeftHandThumb1', 'mixamorig:LeftHandThumb2', 'mixamorig:LeftHandThumb3', 'mixamorig:Neck', 'mixamorig:Head', 'mixamorig:RightShoulder', 'mixamorig:RightArm', 'mixamorig:RightForeArm', 'mixamorig:RightHand', 'mixamorig:RightHandIndex1', 'mixamorig:RightHandIndex2', 'mixamorig:RightHandIndex3', 'mixamorig:RightHandMiddle1', 'mixamorig:RightHandMiddle2', 'mixamorig:RightHandMiddle3', 'mixamorig:RightHandPinky1', 'mixamorig:RightHandPinky2', 'mixamorig:RightHandPinky3', 'mixamorig:RightHandRing1', 'mixamorig:RightHandRing2', 'mixamorig:RightHandRing3', 'mixamorig:RightHandThumb1', 'mixamorig:RightHandThumb2', 'mixamorig:RightHandThumb3']
+BM MODS [('Armature', 'ARMATURE'), ('Hide helpers', 'MASK')]
+BM VG 204 ['HelperGeometry', 'JointCubes', 'Left', 'Mid', 'Right', 'body', 'helper-genital', 'helper-hair', 'helper-l-eye', 'helper-l-eyelashes-1', 'helper-l-eyelashes-2', 'helper-lower-teeth', 'helper-r-eye', 'helper-r-eyelashes-1', 'helper-r-eyelashes-2', 'helper-skirt', 'helper-tights', 'helper-tongue', 'helper-upper-teeth', 'joint-ground', 'joint-head', 'joint-head-2', 'joint-jaw', 'joint-l-ankle', 'joint-l-clavicle', 'joint-l-elbow', 'joint-l-eye', 'joint-l-eye-target', 'joint-l-finger-1-1', 'joint-l-finger-1-2', 'joint-l-finger-1-3', 'joint-l-finger-1-4', 'joint-l-finger-2-1', 'joint-l-finger-2-2', 'joint-l-finger-2-3', 'joint-l-finger-2-4', 'joint-l-finger-3-1', 'joint-l-finger-3-2', 'joint-l-finger-3-3', 'joint-l-finger-3-4', 'joint-l-finger-4-1', 'joint-l-finger-4-2', 'joint-l-finger-4-3', 'joint-l-finger-4-4', 'joint-l-finger-5-1', 'joint-l-finger-5-2', 'joint-l-finger-5-3', 'joint-l-finger-5-4', 'joint-l-foot-1', 'joint-l-foot-2', 'joint-l-hand', 'joint-l-hand-2', 'joint-l-hand-3', 'joint-l-knee', 'joint-l-lowerlid', 'joint-l-scapula', 'joint-l-shoulder', 'joint-l-toe-1-1', 'joint-l-toe-1-2', 'joint-l-toe-1-3', 'joint-l-toe-2-1', 'joint-l-toe-2-2', 'joint-l-toe-2-3', 'joint-l-toe-2-4', 'joint-l-toe-3-1', 'joint-l-toe-3-2', 'joint-l-toe-3-3', 'joint-l-toe-3-4', 'joint-l-toe-4-1', 'joint-l-toe-4-2', 'joint-l-toe-4-3', 'joint-l-toe-4-4', 'joint-l-toe-5-1', 'joint-l-toe-5-2', 'joint-l-toe-5-3', 'joint-l-toe-5-4', 'joint-l-upper-leg', 'joint-l-upperlid', 'joint-mouth', 'joint-neck']
+Info: Packed 7 file(s)
+Info: Saved as "stage1.blend"
+SAVED /project/build/out/stage1.blend
+SAVED stage1
+Blender 5.2.4 LTS (hash cd5dc428cce1 built 2026-11-10 01:31:47)
+OBJ import of 'base.obj' took 19.98 ms
+OBJ import of 'high-poly.obj' took 2.20 ms
+OBJ import of 'teeth_base.obj' took 3.56 ms
+OBJ import of 'tongue01.obj' took 0.73 ms
+OBJ import of 'mind_eyebrows_05.obj' took 14.88 ms
+OBJ import of 'mind_eyelashes_02.obj' took 9.59 ms
+
+Blender quit
+EXIT 0

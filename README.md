@@ -56,6 +56,38 @@ the voice pauses there. On seven damaged test pages gpt-6.2-sol found 88 to
 100% of the words on six; the seventh, blurred past what a person can read,
 came back as unreadable rather than as made-up text.
 
+## Her on screen
+
+"Show her" in Settings puts her at the top of the page, in one of two forms.
+
+**On video (photo-real), while a GPU box is running.** She is a fictional
+woman: one generated still and three short generated clips of her (waiting,
+thinking, and a closed-mouth clip with natural head movement). A GPU box
+(`avatar-gpu/`, MuseTalk 1.5) redraws her mouth to match each piece of
+speech, about four times faster than real time on one L40S.
+
+- Play: the voice is made as usual, each piece goes to the box, and the
+  browser joins the returned video pieces (voice inside) into one video.
+  While waiting she is shown thinking; between pieces, idle.
+- Live call: her voice is held back about a second and cut into 0.4 s
+  chunks; each comes back as silent video, and a clock keeps the picture on
+  the chunk being heard. The voice itself is not touched.
+- The browser fetches the video from the box's own tunnel address with a
+  short-lived signed token. It does not pass through this app, whose Funnel
+  was measured to carry video slower than it plays.
+- The box is rented by the hour and tells the app where it is when it
+  starts (`POST /api/avatar/register`, secret `AVATAR_GPU_KEY`). To start
+  one, see `avatar-gpu/README.md`.
+
+**As a 3D character, when no box is running.** `public/avatar/avatar.glb`
+was built in Blender (MakeHuman base fitted to the same face, photo skin,
+52 face shapes, skeleton, clothes) and is drawn by the browser with
+three.js. Her mouth follows the sound of the voice; she breathes, blinks,
+looks about, nods and gestures (`src/lib/avatar/`). It needs no server. It
+looks like a good 3D character, not like a person on video.
+
+The build scripts and references for both are in `avatar-build/`.
+
 ## Run it
 
 Needs Node.js 22 or newer.

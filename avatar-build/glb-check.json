@@ -1,0 +1,541 @@
+{
+ "file_bytes": 14488468,
+ "meshes": {
+  "Body": {
+   "primitives": 1,
+   "triangles": 20148,
+   "vertices": 11149,
+   "morphTargets": [
+    "viseme_aa",
+    "viseme_CH",
+    "viseme_DD",
+    "viseme_E",
+    "viseme_FF",
+    "viseme_I",
+    "viseme_kk",
+    "viseme_nn",
+    "viseme_O",
+    "viseme_PP",
+    "viseme_RR",
+    "viseme_sil",
+    "viseme_SS",
+    "viseme_TH",
+    "viseme_U",
+    "browDownLeft",
+    "browDownRight",
+    "browInnerUp",
+    "browOuterUpLeft",
+    "browOuterUpRight",
+    "cheekPuff",
+    "cheekSquintLeft",
+    "cheekSquintRight",
+    "eyeBlinkLeft",
+    "eyeBlinkRight",
+    "eyeLookDownLeft",
+    "eyeLookDownRight",
+    "eyeLookInLeft",
+    "eyeLookInRight",
+    "eyeLookOutLeft",
+    "eyeLookOutRight",
+    "eyeLookUpLeft",
+    "eyeLookUpRight",
+    "eyeSquintLeft",
+    "eyeSquintRight",
+    "eyeWideLeft",
+    "eyeWideRight",
+    "jawForward",
+    "jawLeft",
+    "jawOpen",
+    "jawRight",
+    "mouthClose",
+    "mouthDimpleLeft",
+    "mouthDimpleRight",
+    "mouthFrownLeft",
+    "mouthFrownRight",
+    "mouthFunnel",
+    "mouthLeft",
+    "mouthLowerDownLeft",
+    "mouthLowerDownRight",
+    "mouthPressLeft",
+    "mouthPressRight",
+    "mouthPucker",
+    "mouthRight",
+    "mouthRollLower",
+    "mouthRollUpper",
+    "mouthShrugLower",
+    "mouthShrugUpper",
+    "mouthSmileLeft",
+    "mouthSmileRight",
+    "mouthStretchLeft",
+    "mouthStretchRight",
+    "mouthUpperUpLeft",
+    "mouthUpperUpRight",
+    "noseSneerLeft",
+    "noseSneerRight",
+    "tongueOut"
+   ],
+   "targets_in_prim0": 67,
+   "sparse_targets": 67,
+   "morph_normals": false
+  },
+  "Dupatta": {
+   "primitives": 1,
+   "triangles": 22960,
+   "vertices": 11742,
+   "morphTargets": [],
+   "targets_in_prim0": 0,
+   "sparse_targets": 0,
+   "morph_normals": false
+  },
+  "Eyes": {
+   "primitives": 1,
+   "triangles": 1060,
+   "vertices": 552,
+   "morphTargets": [
+    "eyeLookDownLeft",
+    "eyeLookDownRight",
+    "eyeLookInLeft",
+    "eyeLookInRight",
+    "eyeLookOutLeft",
+    "eyeLookOutRight",
+    "eyeLookUpLeft",
+    "eyeLookUpRight"
+   ],
+   "targets_in_prim0": 8,
+   "sparse_targets": 8,
+   "morph_normals": false
+  },
+  "Hair": {
+   "primitives": 1,
+   "triangles": 22080,
+   "vertices": 22816,
+   "morphTargets": [],
+   "targets_in_prim0": 0,
+   "sparse_targets": 0,
+   "morph_normals": false
+  },
+  "Jewellery": {
+   "primitives": 1,
+   "triangles": 2000,
+   "vertices": 1098,
+   "morphTargets": [],
+   "targets_in_prim0": 0,
+   "sparse_targets": 0,
+   "morph_normals": false
+  },
+  "Kameez": {
+   "primitives": 1,
+   "triangles": 32624,
+   "vertices": 18590,
+   "morphTargets": [],
+   "targets_in_prim0": 0,
+   "sparse_targets": 0,
+   "morph_normals": false
+  },
+  "Khussa": {
+   "primitives": 1,
+   "triangles": 1764,
+   "vertices": 1014,
+   "morphTargets": [],
+   "targets_in_prim0": 0,
+   "sparse_targets": 0,
+   "morph_normals": false
+  },
+  "Lashes": {
+   "primitives": 1,
+   "triangles": 12132,
+   "vertices": 8088,
+   "morphTargets": [
+    "viseme_E",
+    "viseme_SS",
+    "browDownLeft",
+    "browDownRight",
+    "browInnerUp",
+    "cheekPuff",
+    "cheekSquintLeft",
+    "cheekSquintRight",
+    "eyeBlinkLeft",
+    "eyeBlinkRight",
+    "eyeLookDownLeft",
+    "eyeLookDownRight",
+    "eyeLookInLeft",
+    "eyeLookInRight",
+    "eyeLookOutLeft",
+    "eyeLookOutRight",
+    "eyeLookUpLeft",
+    "eyeLookUpRight",
+    "eyeSquintLeft",
+    "eyeSquintRight",
+    "eyeWideLeft",
+    "eyeWideRight",
+    "mouthSmileLeft",
+    "mouthSmileRight",
+    "mouthStretchLeft",
+    "mouthStretchRight",
+    "noseSneerLeft",
+    "noseSneerRight"
+   ],
+   "targets_in_prim0": 28,
+   "sparse_targets": 28,
+   "morph_normals": false
+  },
+  "Shalwar": {
+   "primitives": 1,
+   "triangles": 6560,
+   "vertices": 3444,
+   "morphTargets": [],
+   "targets_in_prim0": 0,
+   "sparse_targets": 0,
+   "morph_normals": false
+  },
+  "Teeth": {
+   "primitives": 1,
+   "triangles": 7120,
+   "vertices": 4494,
+   "morphTargets": [
+    "viseme_aa",
+    "viseme_DD",
+    "viseme_E",
+    "viseme_kk",
+    "viseme_nn",
+    "viseme_O",
+    "viseme_PP",
+    "viseme_TH",
+    "jawForward",
+    "jawLeft",
+    "jawOpen",
+    "jawRight",
+    "viseme_I"
+   ],
+   "targets_in_prim0": 13,
+   "sparse_targets": 13,
+   "morph_normals": false
+  },
+  "Tongue": {
+   "primitives": 1,
+   "triangles": 448,
+   "vertices": 253,
+   "morphTargets": [
+    "viseme_aa",
+    "viseme_DD",
+    "viseme_E",
+    "viseme_kk",
+    "viseme_nn",
+    "viseme_O",
+    "viseme_PP",
+    "viseme_TH",
+    "jawForward",
+    "jawLeft",
+    "jawOpen",
+    "jawRight",
+    "tongueOut",
+    "viseme_I"
+   ],
+   "targets_in_prim0": 14,
+   "sparse_targets": 0,
+   "morph_normals": false
+  }
+ },
+ "images": [
+  {
+   "name": "skin_normal_clean",
+   "mime": "image/jpeg",
+   "bytes": 366285,
+   "size": [
+    2048,
+    2048
+   ]
+  },
+  {
+   "name": "skin_color_clean",
+   "mime": "image/jpeg",
+   "bytes": 860722,
+   "size": [
+    4096,
+    4096
+   ]
+  },
+  {
+   "name": "skin_rough_clean",
+   "mime": "image/png",
+   "bytes": 179412,
+   "size": [
+    2048,
+    2048
+   ]
+  },
+  {
+   "name": "chiffon_normal",
+   "mime": "image/jpeg",
+   "bytes": 436816,
+   "size": [
+    1024,
+    1024
+   ]
+  },
+  {
+   "name": "chiffon",
+   "mime": "image/jpeg",
+   "bytes": 65352,
+   "size": [
+    1024,
+    1024
+   ]
+  },
+  {
+   "name": "eye",
+   "mime": "image/png",
+   "bytes": 550185,
+   "size": [
+    1024,
+    1024
+   ]
+  },
+  {
+   "name": "hair_normal",
+   "mime": "image/jpeg",
+   "bytes": 273868,
+   "size": [
+    1024,
+    1024
+   ]
+  },
+  {
+   "name": "hair",
+   "mime": "image/png",
+   "bytes": 1551593,
+   "size": [
+    1024,
+    1024
+   ]
+  },
+  {
+   "name": "weave_normal",
+   "mime": "image/jpeg",
+   "bytes": 134488,
+   "size": [
+    512,
+    512
+   ]
+  },
+  {
+   "name": "kameez_color",
+   "mime": "image/jpeg",
+   "bytes": 637781,
+   "size": [
+    4096,
+    2048
+   ]
+  },
+  {
+   "name": "khussa",
+   "mime": "image/jpeg",
+   "bytes": 104517,
+   "size": [
+    512,
+    512
+   ]
+  },
+  {
+   "name": "lawn_plain",
+   "mime": "image/jpeg",
+   "bytes": 8752,
+   "size": [
+    512,
+    512
+   ]
+  },
+  {
+   "name": "teeth",
+   "mime": "image/png",
+   "bytes": 654876,
+   "size": [
+    1024,
+    1024
+   ]
+  },
+  {
+   "name": "tongue",
+   "mime": "image/png",
+   "bytes": 641628,
+   "size": [
+    1024,
+    1024
+   ]
+  }
+ ],
+ "triangles": 128896,
+ "skins": [
+  {
+   "name": "Armature",
+   "joints": [
+    "Hips",
+    "LeftUpLeg",
+    "LeftLeg",
+    "LeftFoot",
+    "LeftToeBase",
+    "RightUpLeg",
+    "RightLeg",
+    "RightFoot",
+    "RightToeBase",
+    "Spine",
+    "Spine1",
+    "Spine2",
+    "LeftShoulder",
+    "LeftArm",
+    "LeftForeArm",
+    "LeftHand",
+    "LeftHandIndex1",
+    "LeftHandIndex2",
+    "LeftHandIndex3",
+    "LeftHandMiddle1",
+    "LeftHandMiddle2",
+    "LeftHandMiddle3",
+    "LeftHandPinky1",
+    "LeftHandPinky2",
+    "LeftHandPinky3",
+    "LeftHandRing1",
+    "LeftHandRing2",
+    "LeftHandRing3",
+    "LeftHandThumb1",
+    "LeftHandThumb2",
+    "LeftHandThumb3",
+    "Neck",
+    "Head",
+    "RightShoulder",
+    "RightArm",
+    "RightForeArm",
+    "RightHand",
+    "RightHandIndex1",
+    "RightHandIndex2",
+    "RightHandIndex3",
+    "RightHandMiddle1",
+    "RightHandMiddle2",
+    "RightHandMiddle3",
+    "RightHandPinky1",
+    "RightHandPinky2",
+    "RightHandPinky3",
+    "RightHandRing1",
+    "RightHandRing2",
+    "RightHandRing3",
+    "RightHandThumb1",
+    "RightHandThumb2",
+    "RightHandThumb3"
+   ]
+  }
+ ],
+ "mesh_nodes": [
+  "Body",
+  "Dupatta",
+  "Eyes",
+  "Hair",
+  "Jewellery",
+  "Kameez",
+  "Khussa",
+  "Lashes",
+  "Shalwar",
+  "Teeth",
+  "Tongue"
+ ],
+ "min_y": 0,
+ "extensionsUsed": [
+  "KHR_materials_specular",
+  "KHR_texture_transform"
+ ],
+ "extensionsRequired": [
+  "KHR_texture_transform"
+ ],
+ "materials": [
+  {
+   "name": "Skin",
+   "alphaMode": "OPAQUE",
+   "doubleSided": true,
+   "textures": [
+    "baseColorTexture",
+    "metallicRoughnessTexture",
+    "normalTexture"
+   ]
+  },
+  {
+   "name": "Chiffon",
+   "alphaMode": "OPAQUE",
+   "doubleSided": true,
+   "textures": [
+    "baseColorTexture",
+    "normalTexture"
+   ]
+  },
+  {
+   "name": "Eyes",
+   "alphaMode": "OPAQUE",
+   "doubleSided": true,
+   "textures": [
+    "baseColorTexture"
+   ]
+  },
+  {
+   "name": "Hair",
+   "alphaMode": "BLEND",
+   "doubleSided": true,
+   "textures": [
+    "baseColorTexture",
+    "normalTexture"
+   ]
+  },
+  {
+   "name": "Gold",
+   "alphaMode": "OPAQUE",
+   "doubleSided": true,
+   "textures": []
+  },
+  {
+   "name": "Lawn",
+   "alphaMode": "OPAQUE",
+   "doubleSided": true,
+   "textures": [
+    "baseColorTexture",
+    "normalTexture"
+   ]
+  },
+  {
+   "name": "Khussa",
+   "alphaMode": "OPAQUE",
+   "doubleSided": true,
+   "textures": [
+    "baseColorTexture"
+   ]
+  },
+  {
+   "name": "Lash",
+   "alphaMode": "OPAQUE",
+   "doubleSided": true,
+   "textures": []
+  },
+  {
+   "name": "LawnPlain",
+   "alphaMode": "OPAQUE",
+   "doubleSided": true,
+   "textures": [
+    "baseColorTexture",
+    "normalTexture"
+   ]
+  },
+  {
+   "name": "Teeth",
+   "alphaMode": "OPAQUE",
+   "doubleSided": true,
+   "textures": [
+    "baseColorTexture"
+   ]
+  },
+  {
+   "name": "Tongue",
+   "alphaMode": "OPAQUE",
+   "doubleSided": true,
+   "textures": [
+    "baseColorTexture"
+   ]
+  }
+ ],
+ "generator": "Khronos glTF Blender I/O v5.2.41"
+}

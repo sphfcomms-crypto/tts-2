@@ -21,6 +21,8 @@ export interface Toggles {
   sounds: boolean;
   // Show which model handles each job.
   showEngines: boolean;
+  // Show her on screen: the 3D avatar that speaks and listens.
+  avatar: boolean;
 }
 
 export interface AppState extends Toggles {
@@ -46,6 +48,7 @@ const DEFAULT_TOGGLES: Toggles = {
   captions: true,
   sounds: true,
   showEngines: false,
+  avatar: true,
 };
 
 const STORAGE_KEY = "tts-settings";

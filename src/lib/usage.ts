@@ -7,7 +7,7 @@
 // To change a cap, set e.g. LIMIT_SPEECH_PER_DAY=1000 in .env. To switch the
 // guard off, set USAGE_LIMITS=off.
 
-type Kind = "speech" | "text" | "mic" | "call" | "file";
+type Kind = "speech" | "text" | "mic" | "call" | "file" | "video";
 
 const DEFAULTS: Record<Kind, { perVisitorPerHour: number; perDay: number }> = {
   speech: { perVisitorPerHour: 40, perDay: 500 },
@@ -17,6 +17,9 @@ const DEFAULTS: Record<Kind, { perVisitorPerHour: number; perDay: number }> = {
   call: { perVisitorPerHour: 6, perDay: 60 },
   // Uploaded recordings to transcribe.
   file: { perVisitorPerHour: 10, perDay: 100 },
+  // Chunks of her live-call voice sent to the GPU to be drawn: several a
+  // second for as long as she is speaking.
+  video: { perVisitorPerHour: 6000, perDay: 40000 },
 };
 
 const HOUR = 60 * 60_000;

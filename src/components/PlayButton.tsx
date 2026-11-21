@@ -5,6 +5,8 @@ import { appStore } from "@/lib/store";
 import { IS_BLINK, fetchSpeech, speechRequest } from "@/lib/files";
 import { refreshEngineStatus } from "./EngineStatus";
 import { StreamPlayer } from "@/lib/streamPlayer";
+import { avatarBus } from "@/lib/avatar/bus";
+import { TalkPlayer } from "@/lib/avatar/talkPlayer";
 import s from "./ui/Footer.module.css";
 
 const PlayingWaveform = ({
@@ -42,6 +44,13 @@ export default function PlayButton() {
   const audioRef = useRef<{ pause: () => void } | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  // Lets go of the avatar's tap on the clip that is playing.
+  const releaseVoice = useRef<(() => void) | null>(null);
+  const quietAvatar = () => {
+    releaseVoice.current?.();
+    releaseVoice.current = null;
+    avatarBus.setMood("idle");
+  };
   const [amplitudeLevels, setAmplitudeLevels] = useState<number[]>(
     new Array(5).fill(0)
   );
@@ -65,12 +74,15 @@ export default function PlayButton() {
         setIsPlaying(false);
         setAudioLoaded(false);
         stopSampling();
+        quietAvatar();
       }
       return;
     }
 
     setAudioLoading(true);
     stopSampling();
+    // Until her voice starts, the avatar is thinking about what to say.
+    avatarBus.setMood("thinking");
 
     const onError = (err?: unknown) => {
       if (err) console.error("Error playing speech:", err);
@@ -78,11 +90,13 @@ export default function PlayButton() {
       setAudioLoading(false);
       setAudioLoaded(false);
       setIsPlaying(false);
+      quietAvatar();
       refreshEngineStatus();
       alert("Error generating audio");
     };
 
     const onPlay = () => {
+      avatarBus.setMood("idle");
       refreshEngineStatus();
       amplitudeIntervalRef.current = window.setInterval(() => {
         if (!analyserRef.current) {
@@ -108,9 +122,48 @@ export default function PlayButton() {
       audioRef.current = null;
       stopSampling();
       setIsPlaying(false);
+      quietAvatar();
     };
 
     try {
+      // When she is on screen as photo-real video, she speaks from the GPU
+      // box: picture and voice together. If that cannot be done she is
+      // heard as usual, below.
+      const stage = avatarBus.stage;
+      if (stage) {
+        try {
+          const { init } = await speechRequest();
+          // Her video comes straight from the GPU box when the browser can
+          // reach it; otherwise through this app.
+          if (avatarBus.direct && init.body instanceof FormData) {
+            init.body.set("direct", "1");
+          }
+          const talk = new TalkPlayer(stage.video);
+          analyserRef.current = null;
+          audioRef.current = {
+            pause: () => {
+              talk.stop();
+              stage.speaking(false);
+            },
+          };
+          talk.onplay = () => {
+            stage.speaking(true);
+            onPlay();
+          };
+          talk.onended = () => {
+            stage.speaking(false);
+            onEnded();
+          };
+          talk.onstall = (stalled) => stage.speaking(!stalled);
+          await talk.start("/api/avatar/speak", init);
+          return;
+        } catch (err) {
+          console.warn("No video this time, playing her voice alone:", err);
+          stage.speaking(false);
+          audioRef.current = null;
+        }
+      }
+
       // A clip made earlier for the same script and settings is replayed.
       const ready = appStore.getState().latestAudio;
 
@@ -125,6 +178,7 @@ export default function PlayButton() {
         const { init } = await speechRequest();
         const player = new StreamPlayer(ctx);
         analyserRef.current = player.analyser;
+        releaseVoice.current = avatarBus.attachVoice(player.analyser);
         audioRef.current = player;
         player.onplay = onPlay;
         player.onended = onEnded;
@@ -143,6 +197,18 @@ export default function PlayButton() {
       const url = URL.createObjectURL(clip);
       const audio = new Audio(url);
       analyserRef.current = null;
+      // The clip also passes through Web Audio, so the avatar's mouth can
+      // follow it. If that is not possible it simply plays as before.
+      try {
+        if (!audioContextRef.current) {
+          audioContextRef.current = new AudioContext();
+        }
+        const ctx = audioContextRef.current;
+        await ctx.resume();
+        const source = ctx.createMediaElementSource(audio);
+        source.connect(ctx.destination);
+        releaseVoice.current = avatarBus.attachVoice(source);
+      } catch {}
       audioRef.current = audio;
       audio.onplay = onPlay;
       audio.onerror = () => onError();

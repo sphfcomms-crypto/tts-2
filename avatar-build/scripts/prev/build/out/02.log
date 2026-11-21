@@ -1,0 +1,21 @@
+00:00.090  system.path      | WARNING Could not get a list of mounted file-systems
+00:01.568  blend            | Read blend: "/__modal/volumes/vo-5WGZf9P7hiJwIA4gOcRA5t/build/out/stage1.blend"
+/__modal/volumes/vo-5WGZf9P7hiJwIA4gOcRA5t/build/scripts/02_skinbake.py:38: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+  m = bpy.data.materials.new('SkinBake'); m.use_nodes = True; nt = m.node_tree; nt.nodes.clear()
+00:03.546  cycles           | WARNING HIPEW initialization failed: Error opening HIP dynamic library
+00:05.598  system.path      | WARNING Could not get a list of mounted file-systems
+[INFO ] services.locationservice ...............: Not adding link to MakeHuman user data, since neither explicit path nor auto-discovery is set in preferences.
+[INFO ] mpfb.init ..............................: Build info 20261121
+[INFO ] mpfb.init ..............................: Online access preference is not enabled. Not checking if MakeHuman is online.
+[INFO ] mpfb.init ..............................: MPFB initialization has finished.
+Info: Baking map saved to internal image, save it externally or pack it
+BAKED skin_final
+BODY verts 13380 polys 13378 keys 68
+Info: Packed 5 file(s)
+Info: Saved as "stage2.blend"
+SAVED /project/build/out/stage2.blend
+SAVED stage2
+Blender 5.2.4 LTS (hash cd5dc428cce1 built 2026-11-10 01:31:47)
+
+Blender quit
+EXIT 0

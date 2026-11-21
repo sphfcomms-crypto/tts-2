@@ -1,0 +1,28 @@
+# Python packages for the lip-sync server (installed into /workspace/avatar-gpu/venv by setup.sh).
+# setup.sh resolves everything not pinned here as of 2025-03-01 (uv --exclude-newer) and
+# writes the exact result to requirements.lock.
+torch==2.6.0
+torchvision==0.21.0
+diffusers==0.32.2
+transformers==4.48.3
+accelerate==1.3.0
+huggingface_hub==0.28.1
+safetensors
+numpy==1.26.4
+opencv-python-headless
+pillow
+einops
+omegaconf
+av
+soundfile
+soxr
+scipy
+fastapi
+uvicorn
+uvloop
+httptools
+# one-time avatar preparation only (face landmarks with DWPose through ONNX Runtime)
+rtmlib
+onnxruntime
+gdown
+tqdm

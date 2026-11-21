@@ -47,3 +47,9 @@ next-env.d.ts
 
 # sample clips made while testing
 /samples/
+
+# avatar: large working files stay out of git (scripts and references are kept)
+/avatar-build/video/
+/avatar-build/renders/
+/avatar-build/looks/
+/avatar-build/reference/*.png

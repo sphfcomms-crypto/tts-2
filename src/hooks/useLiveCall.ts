@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { avatarBus } from "@/lib/avatar/bus";
+import { LiveTalk } from "@/lib/avatar/liveTalk";
+import { canPlayTalk } from "@/lib/avatar/talkPlayer";
 
 export type CallStatus = "idle" | "connecting" | "live";
 
@@ -27,6 +30,10 @@ export function useLiveCall({ onCaption, onError }: Options) {
   const sessionId = useRef("");
   const timers = useRef<number[]>([]);
   const active = useRef(false);
+  // Web Audio taps for the avatar: her voice and the caller's microphone.
+  const hearing = useRef<{ context: AudioContext; release: (() => void)[] } | null>(null);
+  // Her on video during the call, when the photo-real avatar is on screen.
+  const face = useRef<LiveTalk | null>(null);
 
   const cleanup = useCallback(() => {
     active.current = false;
@@ -47,6 +54,14 @@ export function useLiveCall({ onCaption, onError }: Options) {
       speaker.current.srcObject = null;
       speaker.current = null;
     }
+    face.current?.stop();
+    face.current = null;
+    if (hearing.current) {
+      hearing.current.release.forEach((release) => release());
+      hearing.current.context.close().catch(() => {});
+      hearing.current = null;
+    }
+    avatarBus.setMood("idle");
     setStatus("idle");
   }, []);
 
@@ -89,6 +104,17 @@ export function useLiveCall({ onCaption, onError }: Options) {
         }
         mic.current = stream;
 
+        // The avatar listens to the caller and moves her mouth with her
+        // own voice. Nothing is played from here: these only measure.
+        try {
+          const context = new AudioContext();
+          hearing.current = {
+            context,
+            release: [avatarBus.attachEar(context.createMediaStreamSource(stream))],
+          };
+          avatarBus.setMood("listening");
+        } catch {}
+
         const pc = new RTCPeerConnection();
         peer.current = pc;
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -100,6 +126,35 @@ export function useLiveCall({ onCaption, onError }: Options) {
         pc.ontrack = (event) => {
           audio.srcObject = event.streams[0];
           audio.play().catch(() => {});
+
+          // On video, her voice is heard from the video itself (it is in
+          // time with her lips there), so the direct sound is muted. If the
+          // video cannot be made, the direct sound comes back.
+          const stage = avatarBus.stage;
+          if (stage && canPlayTalk() && !face.current) {
+            audio.muted = true;
+            const talk = new LiveTalk(stage, event.streams[0], () => {
+              audio.muted = false;
+            });
+            face.current = talk;
+            if (process.env.NODE_ENV !== "production") {
+              Object.assign(window, { __liveTalk: talk });
+            }
+            talk.start().catch(() => {
+              audio.muted = false;
+            });
+          }
+
+          const ears = hearing.current;
+          if (ears) {
+            try {
+              ears.release.push(
+                avatarBus.attachVoice(
+                  ears.context.createMediaStreamSource(event.streams[0])
+                )
+              );
+            } catch {}
+          }
         };
 
         // Events (ready, captions, closed) arrive on this channel. It has

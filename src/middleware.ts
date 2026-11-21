@@ -20,6 +20,10 @@ export function middleware(req: NextRequest) {
   if (!password || process.env.NODE_ENV !== "production") {
     return NextResponse.next();
   }
+  // The avatar's GPU box announces itself here with its own secret key.
+  if (req.nextUrl.pathname === "/api/avatar/register") {
+    return NextResponse.next();
+  }
 
   const header = req.headers.get("authorization") || "";
   if (header.startsWith("Basic ")) {

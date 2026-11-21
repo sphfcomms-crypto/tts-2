@@ -21,6 +21,11 @@ const TOGGLES: { key: keyof Toggles; label: string; note: string }[] = [
     note: "Shows what each of you says during a call.",
   },
   {
+    key: "avatar",
+    label: "Show her",
+    note: "Her, at the top of the page: on photo-real video while the GPU box is running, as a 3D character otherwise.",
+  },
+  {
     key: "sounds",
     label: "Button sounds",
     note: "The click when a button is pressed.",

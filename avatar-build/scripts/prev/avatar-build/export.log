@@ -1,0 +1,52 @@
+00:00.084  system.path      | WARNING Could not get a list of mounted file-systems
+00:00.423  blend            | Read blend: "/project/scene.blend"
+/__modal/volumes/vo-5WGZf9P7hiJwIA4gOcRA5t/avatar-build/scripts/09_export.py:24: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+  if not m or not m.use_nodes:continue
+00:01.468  system.path      | WARNING Could not get a list of mounted file-systems
+Info: No new files have been packed
+Info: Saved as "scene.blend"
+SAVED /project/scene.blend
+INFO Draco is available, use library at /opt/blender/lib/libbf_intern_draco_bridge.so
+INFO MeshOptimizer is available, use library at /opt/blender/lib/libbf_intern_meshopt_bridge.so
+11:58:05 | INFO: Starting glTF 2.0 export
+11:58:05 | INFO: Extracting primitive: FaceBody
+11:58:05 | INFO: Primitives created: 5
+11:58:05 | WARNING: There are more than 4 joint vertex influences.The 4 with highest weight will be used (and normalized).
+11:58:06 | INFO: Extracting primitive: CombedHairCards
+11:58:06 | WARNING: More than one shader node tex image used for a texture. The resulting glTF sampler will behave like the first shader node tex image.
+11:58:06 | INFO: Primitives created: 1
+11:58:06 | INFO: Extracting primitive: ChiffonDupatta
+11:58:06 | INFO: Primitives created: 1
+11:58:06 | INFO: Extracting primitive: Kameez
+11:58:06 | INFO: Primitives created: 1
+11:58:06 | INFO: Extracting primitive: base.001
+11:58:06 | INFO: Primitives created: 1
+11:58:06 | INFO: Extracting primitive: Sphere
+11:58:06 | INFO: Primitives created: 1
+11:58:06 | INFO: Extracting primitive: LeftKhussa
+11:58:06 | INFO: Primitives created: 2
+11:58:06 | INFO: Extracting primitive: LeftShalwar
+11:58:06 | INFO: Primitives created: 1
+11:58:06 | INFO: Extracting primitive: LeftSleeve
+11:58:06 | INFO: Primitives created: 1
+11:58:06 | INFO: Extracting primitive: NeckBinding
+11:58:06 | INFO: Primitives created: 1
+11:58:06 | INFO: Extracting primitive: Sphere.024
+11:58:06 | INFO: Primitives created: 1
+11:58:06 | INFO: Extracting primitive: Sphere.012
+11:58:06 | INFO: Primitives created: 1
+11:58:06 | INFO: Extracting primitive: RightKhussa
+11:58:06 | INFO: Primitives created: 2
+11:58:06 | INFO: Extracting primitive: RightShalwar
+11:58:06 | INFO: Primitives created: 1
+11:58:06 | INFO: Extracting primitive: RightSleeve
+11:58:06 | INFO: Primitives created: 1
+11:58:06 | INFO: Finished glTF 2.0 export in 1.4724531173706055 s
+
+RESULT 188586 22322688 dict_keys(['Body', 'CentrePartHair', 'ChiffonDupatta', 'Kameez', 'KameezYoke', 'LeftJhumka', 'LeftKhussa', 'LeftShalwar', 'LeftSleeve', 'NeckBinding', 'NosePin', 'RightJhumka', 'RightKhussa', 'RightShalwar', 'RightSleeve']) 1.6102795656770468 1
+JAW [('Body', 0.0405982)]
+INACTIVE [('Body', [])]
+BONES 52
+Blender 5.2.4 LTS (hash cd5dc428cce1 built 2026-11-10 01:31:47)
+
+Blender quit

@@ -1,0 +1,12 @@
+00:00.083  system.path      | WARNING Could not get a list of mounted file-systems
+00:00.426  blend            | Read blend: "/project/scene.blend"
+00:00.601  cycles           | WARNING HIPEW initialization failed: Error opening HIP dynamic library
+00:01.695  render           | Saved: '/project/avatar-build/renders/testfull.jpg'
+00:02.599  render           | Saved: '/project/avatar-build/renders/testface.jpg'
+00:03.531  render           | Saved: '/project/avatar-build/renders/testback.jpg'
+RENDERED /project/avatar-build/renders/testfull.jpg
+RENDERED /project/avatar-build/renders/testface.jpg
+RENDERED /project/avatar-build/renders/testback.jpg
+Blender 5.2.4 LTS (hash cd5dc428cce1 built 2026-11-10 01:31:47)
+
+Blender quit
