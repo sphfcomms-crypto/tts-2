@@ -1,106 +1,119 @@
 "use client";
 import React, { useEffect, useRef, useState } from "react";
 import { avatarBus, Mood } from "@/lib/avatar/bus";
+import { Director, Unit } from "@/lib/avatar/director";
 
-// Her on video, photo-real. Three layers of the same woman in the same
-// seat:
-//   - listen: a loop of her listening, always running underneath;
-//   - think: a loop of her thinking, shown between Play and her first word;
-//   - talk: her speaking, drawn on the GPU box with her lips matched to the
-//     voice, arriving piece by piece (see TalkPlayer and LiveTalk).
-// The loops are plain files; only the talking needs the GPU.
+// Her on video, photo-real.
 //
-// The talking is drawn on the same clip as the listening loop, frame for
-// frame, so going from one to the other is the same take with her mouth
-// opening or closing, not a cut to another picture.
+// She is filmed in short clips of body language (listening, nodding, hand
+// gestures, a wave, a thoughtful look) that all start and end in the same
+// pose. The director plays them back to back on the two lower layers,
+// choosing by what she is doing. When she speaks, the GPU box draws her
+// lips on the very frames that are playing, and that video shows on the
+// top layer (see LiveTalk). The clips are plain files; only the lips need
+// the GPU.
 
 const FILES = "/avatar/video";
 
-export function VideoAvatar() {
+// Before the body-language clips existed there was one long listening
+// loop. It still serves when they are missing or not prepared on the box.
+const ONE_LOOP: Unit[] = [
+  { name: "talk", frames: 720, pool: "listen", file: `${FILES}/listen.mp4` },
+];
+
+type Listing = {
+  units?: { name: string; frames: number; pool: Unit["pool"]; mouths?: boolean }[];
+};
+
+// clips: the names the GPU box has prepared; only those can carry her lips.
+async function loadUnits(clips: string[]): Promise<Unit[]> {
+  try {
+    const res = await fetch(`${FILES}/units.json`);
+    if (!res.ok) return ONE_LOOP;
+    const listing = (await res.json()) as Listing;
+    const units = (listing.units ?? [])
+      .filter((unit) => clips.includes(unit.name) && unit.frames > 0)
+      .map((unit) => ({ ...unit, file: `${FILES}/units/${unit.name}.mp4` }));
+    return units.some((unit) => unit.pool === "listen") ? units : ONE_LOOP;
+  } catch {
+    return ONE_LOOP;
+  }
+}
+
+export function VideoAvatar({ clips }: { clips: string[] }) {
   const talk = useRef<HTMLVideoElement>(null);
-  const think = useRef<HTMLVideoElement>(null);
-  const base = useRef<HTMLVideoElement>(null);
-  const [following, setFollowing] = useState(false);
+  const first = useRef<HTMLVideoElement>(null);
+  const second = useRef<HTMLVideoElement>(null);
+  const director = useRef<Director | null>(null);
+  const [front, setFront] = useState(0);
   const [speaking, setSpeaking] = useState(false);
+  const [talking, setTalking] = useState(false);
   const [mood, setMood] = useState<Mood>(avatarBus.mood);
 
+  const prepared = clips.join(",");
   useEffect(() => {
-    avatarBus.setStage({
-      video: talk.current!,
-      speaking: setSpeaking,
-      base: base.current!,
-      follow: setFollowing,
+    let gone = false;
+    let made: Director | null = null;
+    loadUnits(prepared.split(",")).then((units) => {
+      if (gone) return;
+      made = new Director([first.current!, second.current!], units, setFront);
+      director.current = made;
+      made.start();
+      avatarBus.setStage({
+        video: talk.current!,
+        speaking: setSpeaking,
+        talking: setTalking,
+        director: made,
+      });
     });
     const stop = avatarBus.onMood(setMood);
     return () => {
+      gone = true;
       stop();
+      made?.stop();
+      director.current = null;
       avatarBus.setStage(null);
     };
-  }, []);
+  }, [prepared]);
 
-  // A script plays from the first frame of the clip: the loop underneath
-  // is kept on the frame the talking video shows.
+  // What her body does next: gestures while she talks, a thoughtful look
+  // while an answer is being made, otherwise listening.
   useEffect(() => {
-    if (!following) return;
-    const timer = window.setInterval(() => {
-      const loop = base.current;
-      const speech = talk.current;
-      // Only while her talking video is really moving: when it is waiting
-      // for its next piece the loop is what is seen, and it must run free.
-      if (!loop || !speech || !loop.duration || speech.paused || speech.readyState < 3) return;
-      const want = speech.currentTime % loop.duration;
-      if (Math.abs(loop.currentTime - want) > 0.06) loop.currentTime = want;
-    }, 200);
-    return () => window.clearInterval(timer);
-  }, [following]);
+    if (!director.current) return;
+    director.current.want = talking ? "talk" : mood === "thinking" ? "think" : "listen";
+  }, [talking, mood]);
 
-  const thinking = mood === "thinking" && !speaking;
-  useEffect(() => {
-    const video = think.current;
-    if (!video) return;
-    if (thinking) {
-      video.currentTime = 0;
-      video.play().catch(() => {});
-    } else {
-      // Left running until it has faded out.
-      const timer = window.setTimeout(() => video.pause(), 400);
-      return () => window.clearTimeout(timer);
-    }
-  }, [thinking]);
-
-  const layer = "absolute inset-0 w-full h-full object-cover transition-opacity duration-300";
-  const framing = { objectPosition: "50% 30%" };
+  const layer = "absolute inset-0 w-full h-full object-cover";
 
   // A 4:3 picture, like the other side of a video call: the whole frame is
   // shown, at the size it was made, so it stays sharp.
   return (
     <div className="relative mx-auto w-full max-w-[720px] aspect-[4/3] mb-10 rounded-lg overflow-hidden shadow-textarea bg-black">
       <video
-        ref={base}
+        ref={first}
         className={layer}
-        style={framing}
-        src={`${FILES}/listen.mp4`}
+        style={{ zIndex: front === 0 ? 2 : 1 }}
         poster={`${FILES}/poster.jpg`}
-        autoPlay
-        loop
         muted
         playsInline
         preload="auto"
       />
       <video
-        ref={think}
+        ref={second}
         className={layer}
-        style={{ ...framing, opacity: thinking ? 1 : 0 }}
-        src={`${FILES}/think.mp4`}
-        loop
+        style={{ zIndex: front === 1 ? 2 : 1 }}
         muted
         playsInline
         preload="auto"
       />
+      {/* Her speaking: the same frames with her lips drawn on. It is shown
+          the instant it is in step, with no fade, so nothing but her mouth
+          is seen to change. */}
       <video
         ref={talk}
         className={layer}
-        style={{ ...framing, opacity: speaking ? 1 : 0 }}
+        style={{ zIndex: 3, opacity: speaking ? 1 : 0 }}
+        muted
         playsInline
       />
     </div>

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { avatarBus } from "@/lib/avatar/bus";
-import { LiveTalk } from "@/lib/avatar/liveTalk";
-import { canPlayTalk } from "@/lib/avatar/talkPlayer";
+import { canShowVideo, LiveTalk, report } from "@/lib/avatar/liveTalk";
 
 export type CallStatus = "idle" | "connecting" | "live";
 
@@ -54,6 +53,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
       speaker.current.srcObject = null;
       speaker.current = null;
     }
+    if (face.current) report("call", face.current);
     face.current?.stop();
     face.current = null;
     if (hearing.current) {
@@ -131,11 +131,16 @@ export function useLiveCall({ onCaption, onError }: Options) {
           // time with her lips there), so the direct sound is muted. If the
           // video cannot be made, the direct sound comes back.
           const stage = avatarBus.stage;
-          if (stage && canPlayTalk() && !face.current) {
+          if (stage && canShowVideo() && !face.current) {
             audio.muted = true;
-            const talk = new LiveTalk(stage, event.streams[0], () => {
-              audio.muted = false;
-            });
+            const talk = new LiveTalk(
+              stage,
+              { stream: event.streams[0] },
+              () => {
+                audio.muted = false;
+              },
+              greet
+            );
             face.current = talk;
             if (process.env.NODE_ENV !== "production") {
               Object.assign(window, { __liveTalk: talk });

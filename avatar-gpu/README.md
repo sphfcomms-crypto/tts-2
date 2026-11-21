@@ -116,6 +116,7 @@ in pauses off), `AVATAR_SILENCE_MIN_FRAMES` (5), `AVATAR_MEL_REF` (0.6), `AVATAR
 | `calibrate_silence.py` | finds the closed-mouth conditioning |
 | `make_loops.sh` | idle/think ping-pong loops and the poster |
 | `build_assets.sh` | the three above in one go |
+| `make_units.sh` | body-language units: prepares them on the box, builds the browser files on the PC (see below) |
 | `server.py` | the server |
 | `start.sh`, `stop.sh`, `keeper.sh` | run it |
 | `test_client.py` | PC-side test: `python test_client.py <tunnel url>` |
@@ -137,3 +138,37 @@ in pauses off), `AVATAR_SILENCE_MIN_FRAMES` (5), `AVATAR_MEL_REF` (0.6), `AVATAR
 - **The `talk` clip** is now a closed-mouth clip with head movement (`talk4.mp4` on the PC), so the
   jaw is drawn by the model alone. The earlier talking clip is kept on the box as
   `clips/talk2-backup.mp4`.
+
+## Body-language units (`make_units.sh`)
+
+Eight short clips (5 s, 121 frames each) of her seated, waist-up, that all start and end in the
+same pose, so the app can play any one after any other. Each is prepared like `talk`, so
+`/speak?clip=<unit>&start=<frame>` draws the mouth on it; `/health` lists them next to `talk` and
+`idle`.
+
+| pool | units |
+|---|---|
+| `listen` | `listen_still`, `listen_nod` |
+| `talk` | `talk_open`, `talk_right`, `talk_chest`, `talk_shrug` |
+| `greet` | `greet` |
+| `think` | `think` |
+
+- **Sources:** on the PC `avatar-build/video/units/src/<name>.mp4` (1112x834, 24 fps, 121 frames),
+  on the box `clips/units/<name>.mp4`: the same files, not in `clips/` itself because
+  `clips/think.mp4` is the old think loop that `make_loops.sh` reads.
+- **On the box:** `bash make_units.sh prepare [name ...]` runs `prepare.py --clip <name> --video
+  clips/units/<name>.mp4 --size 960x720` for each (about 25 s per unit), then restart the server.
+  Without `--neutral-jaw`: with head movement in the clip its fit goes wrong and leaves the base's
+  open mouth showing under the redrawn one. Prepared the normal way the model closes the mouth in
+  pauses even on frames where she talks in the base.
+- **On the PC:** `bash avatar-gpu/make_units.sh web avatar-build/video/units/src
+  public/avatar/video/units` writes the files the browser plays (`units/<name>.mp4`: 960x720,
+  25 fps, forwards only, H.264 High about 1.6 Mbit/s, no B-frames, keyframe every 25 frames, no
+  audio, faststart) and `public/avatar/video/units.json`. Frame k of a unit file is the same
+  picture as frame k of the prepared clip.
+- **Speaking on a unit:** `start` is the frame of the unit that is on screen. The server still
+  treats every clip as forwards-then-backwards (`cycle = 2 * frames - 2`), so a piece that runs
+  past the last frame of a unit comes back with the unit played backwards. A piece must therefore
+  end on the unit's last frame at the latest (`start + frames of the piece <= frames of the unit`);
+  the next piece starts at `start=0` on the next unit.
+- The face is smaller than in `talk` (face box about 137 x 170 pixels instead of 235 x 285).

@@ -61,27 +61,35 @@ came back as unreadable rather than as made-up text.
 "Show her" in Settings puts her at the top of the page, in one of two forms.
 
 **On video (photo-real), while a GPU box is running.** She is a fictional
-woman: one generated still and two short generated clips of her (thinking,
-and listening with natural head movement and a closed mouth). A GPU box
-(`avatar-gpu/`, MuseTalk 1.5) redraws her mouth on the listening clip to
-match each piece of speech, about four times faster than real time on one
-L40S. The browser plays the same listening clip as a loop underneath
-(`public/avatar/video/listen.mp4`) and asks for her speech to be drawn from
-the frame the loop is on, so speaking and listening are one continuous
-take: her mouth starts and stops, nothing else changes.
+woman, filmed (generated) in short clips of body language: listening,
+nodding, an open-hand gesture, a hand on her chest, a shrug, a wave, a
+thoughtful look (`public/avatar/video/units/`). Every clip starts and ends
+in the same seated pose, so any one can follow any other.
 
-- Play: the voice is made as usual, each piece goes to the box, and the
-  browser joins the returned video pieces (voice inside) into one video.
-  While waiting she is shown thinking; between pieces, idle.
-- Live call: her voice is held back about a second and cut into 0.4 s
-  chunks; each comes back as silent video, and a clock keeps the picture on
-  the chunk being heard. The voice itself is not touched.
+- A director in the browser (`src/lib/avatar/director.ts`) plays the clips
+  back to back and picks each next one by what she is doing: gestures while
+  she talks, a wave with her first line of a call, a thoughtful look while
+  an answer is being made, otherwise listening.
+- Her lips are drawn by a GPU box (`avatar-gpu/`, MuseTalk 1.5) on the very
+  frames that are playing (`src/lib/avatar/liveTalk.ts`): her voice, from
+  Play or from a live call, is held back about a second and cut into 0.4 s
+  chunks; each chunk comes back as silent video of her saying it on the
+  clip and frames that will be on screen when it is heard, and a clock
+  keeps the picture on the chunk being heard. The voice itself is not
+  touched. Measured on the box's output, her mouth moves with the sound at
+  an offset of 0 ms.
 - The browser fetches the video from the box's own tunnel address with a
   short-lived signed token. It does not pass through this app, whose Funnel
   was measured to carry video slower than it plays.
 - The box is rented by the hour and tells the app where it is when it
   starts (`POST /api/avatar/register`, secret `AVATAR_GPU_KEY`). To start
   one, see `avatar-gpu/README.md`.
+- When she has finished speaking the page reports how the lip sync kept up
+  on that device (pieces asked and joined, how late, the share of her
+  speech that had lips) to `POST /api/avatar/report`, which writes one line
+  to the server log.
+- Her gestures are not chosen from the meaning of her words, and one
+  begins only when the clip before it has ended (up to five seconds).
 
 **As a 3D character, when no box is running.** `public/avatar/avatar.glb`
 was built in Blender (MakeHuman base fitted to the same face, photo skin,

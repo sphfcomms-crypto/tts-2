@@ -4,9 +4,7 @@ import { route } from "@/lib/router/core";
 import { hasOpenAI } from "@/lib/router/engines";
 import { Piece, speechEngines, splitForSpeech } from "@/lib/router/speech";
 
-// Speaking a script piece by piece: shared by the route that streams the
-// voice (/api/generate) and the one that streams her on video
-// (/api/avatar/speak).
+// Speaking a script piece by piece (used by /api/generate).
 
 const PARALLEL = 4; // pieces generated at the same time
 const HEDGED_PIECES = 2; // opening pieces recorded twice at once

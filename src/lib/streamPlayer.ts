@@ -36,10 +36,16 @@ export class StreamPlayer {
   private downloaded = false;
   private stopped = false;
 
-  constructor(private context: AudioContext) {
+  // output: where the sound goes. Normally the speakers. With null it goes
+  // nowhere by itself: the caller takes it from `analyser` (the video
+  // avatar plays it a moment late, in step with her lips).
+  constructor(
+    private context: AudioContext,
+    output: AudioNode | null = context.destination
+  ) {
     this.analyser = context.createAnalyser();
     this.analyser.fftSize = 256;
-    this.analyser.connect(context.destination);
+    if (output) this.analyser.connect(output);
   }
 
   async start(url: string, init: RequestInit = {}) {

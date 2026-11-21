@@ -1,8 +1,8 @@
 "use client";
 import dynamic from "next/dynamic";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { avatarBus } from "@/lib/avatar/bus";
-import { canPlayTalk } from "@/lib/avatar/talkPlayer";
+import { canShowVideo, send } from "@/lib/avatar/liveTalk";
 import { VideoAvatar } from "./VideoAvatar";
 
 // Her, at the top of the page. While the GPU box is running she is shown
@@ -17,6 +17,9 @@ const Avatar = dynamic(
 
 export function AvatarPanel() {
   const [video, setVideo] = useState<boolean | null>(null);
+  // The clips the GPU box has prepared, by name.
+  const [clips, setClips] = useState<string[]>([]);
+  const told = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -32,7 +35,22 @@ export function AvatarPanel() {
             fetch(`${direct.url}/piece/hello`).catch(() => {});
           }
           avatarBus.setDirect(direct);
-          setVideo(Boolean(status.video) && canPlayTalk());
+          const names: string[] = Array.isArray(status.clips) ? status.clips : [];
+          setClips((before) => (before.join() === names.join() ? before : names));
+          const onVideo = Boolean(status.video) && canShowVideo();
+          // Once per visit: which form of her this device is given, and why.
+          if (!told.current) {
+            told.current = true;
+            send({
+              kind: "view",
+              view: onVideo ? "video" : "3d",
+              gpu: Boolean(status.video),
+              canJoinVideo: canShowVideo(),
+              clips: names.length,
+              direct: Boolean(direct),
+            });
+          }
+          setVideo(onVideo);
         })
         .catch(() => alive && setVideo(false));
     check();
@@ -44,5 +62,5 @@ export function AvatarPanel() {
   }, []);
 
   if (video === null) return null;
-  return video ? <VideoAvatar /> : <Avatar />;
+  return video ? <VideoAvatar clips={clips} /> : <Avatar />;
 }

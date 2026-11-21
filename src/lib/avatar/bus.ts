@@ -5,37 +5,22 @@
 //   ear    the caller's microphone during a live call
 //   mood   what she is doing when she is not speaking
 
+import type { Director } from "./director";
+
 export type Mood = "idle" | "thinking" | "listening";
 
-// The photo-real avatar on screen.
-//
-// Underneath, a loop of her listening always runs (`base`). It is the very
-// clip the GPU draws her speaking on, so a frame of her speaking and the
-// frame of the loop with the same number show the same pose, and the two
-// can be swapped without a jump.
+// The photo-real avatar on screen (VideoAvatar), as the lip sync sees it.
 export type Stage = {
-  // Her talking video plays in this element.
+  // Her speaking (the frames with her lips drawn on) plays in this element.
   video: HTMLVideoElement;
-  // Brings the talking video to the front, or lets the loop show again.
+  // Shows that element, or lets the clip underneath show again.
   speaking: (on: boolean) => void;
-  // The listening loop.
-  base: HTMLVideoElement;
-  // While her talking video plays a script from its first frame, keeps the
-  // loop underneath on the same frame, so she is in the same pose when the
-  // talking stops.
-  follow: (on: boolean) => void;
+  // Tells the stage she has begun or ended a line, so her body gestures
+  // while she talks.
+  talking: (on: boolean) => void;
+  // Plays her body-language clips and knows which frame shows when.
+  director: Director;
 };
-
-export const FRAMES_PER_SECOND = 25;
-
-// Which frame of the listening loop will be showing `ahead` seconds from
-// now. The GPU is asked to draw her speaking from that frame on.
-export function loopFrame(base: HTMLVideoElement, ahead = 0): number {
-  const length = Math.round((base.duration || 0) * FRAMES_PER_SECOND);
-  if (!length) return 0;
-  const frame = Math.round((base.currentTime + ahead) * FRAMES_PER_SECOND);
-  return ((frame % length) + length) % length;
-}
 
 // Where the browser can fetch her video itself: the GPU box's address and a
 // pass that is good for a few minutes (renewed by AvatarPanel).

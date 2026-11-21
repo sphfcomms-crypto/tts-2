@@ -1,0 +1,50 @@
+{
+ "fps": 25,
+ "width": 960,
+ "height": 720,
+ "units": [
+  {
+   "name": "listen_still",
+   "frames": 121,
+   "pool": "listen"
+  },
+  {
+   "name": "listen_nod",
+   "frames": 121,
+   "pool": "listen"
+  },
+  {
+   "name": "talk_open",
+   "frames": 121,
+   "pool": "talk",
+   "mouths": true
+  },
+  {
+   "name": "talk_right",
+   "frames": 121,
+   "pool": "talk",
+   "mouths": true
+  },
+  {
+   "name": "talk_chest",
+   "frames": 121,
+   "pool": "talk",
+   "mouths": true
+  },
+  {
+   "name": "talk_shrug",
+   "frames": 121,
+   "pool": "talk"
+  },
+  {
+   "name": "greet",
+   "frames": 121,
+   "pool": "greet"
+  },
+  {
+   "name": "think",
+   "frames": 121,
+   "pool": "think"
+  }
+ ]
+}

@@ -1,24 +1,25 @@
-import { avatarBus, loopFrame, Stage } from "./bus";
+import { avatarBus, Stage } from "./bus";
+import { FPS, stageClock } from "./director";
 
-// Her on video during a live call.
+// Her lips, drawn on her moving body, for any voice that plays: a live call
+// or a script from the Play button.
 //
-// In a call her voice arrives in real time, straight from the model. To
-// show her lips moving with it:
-//   - her voice is held back a little over a second before it is played
-//     (a plain delay; the sound itself is not touched);
-//   - meanwhile it is cut into 0.4 s chunks, each chunk goes to the GPU box
-//     (through /api/avatar/chunk) and comes back as a short silent video
-//     of her saying it;
+//   - her voice is held back about a second before it is played (a plain
+//     delay; the sound itself is not touched);
+//   - meanwhile it is cut into 0.4 s chunks. For each chunk the director
+//     says which clip, and which frames of it, will be on screen when the
+//     chunk is heard. The GPU box draws her saying the chunk on exactly
+//     those frames and returns a short silent video;
 //   - the video pieces are joined, and a clock keeps the picture on the
 //     piece that belongs to the sound being heard at that moment.
-// Between her lines no video is made and the listening loop shows. Each
-// line is drawn from the frame the loop will have reached when the line is
-// heard, so her mouth simply starts and stops moving in the same take.
+// Underneath, the same clips keep playing without the lips, so when she
+// stops speaking nothing changes but her mouth.
 //
-// If a piece is not back in time, she is shown idle for that moment rather
-// than out of step. The delay adjusts itself, between her lines, to how
-// long the pieces really take. If the GPU stops answering, onFail is called
-// once and the caller goes back to her direct voice.
+// If a piece is not back in time, the clip underneath shows for that
+// moment (her mouth closed) rather than a picture that is out of step. The
+// delay adjusts itself, between her lines, to how long the pieces really
+// take. If the GPU stops answering, onFail is called once and the caller
+// plays her voice directly.
 
 const TYPE = 'video/mp4; codecs="avc1.4d401f"';
 const CHUNK = 0.4; // seconds of voice per piece
@@ -28,13 +29,28 @@ const QUIET = 1.2; // silence that ends a line (shorter pauses are drawn)
 const LOUD = 0.006; // RMS above this is her voice
 const FIRST_DELAY = 1.5; // seconds her voice is held back, to begin with
 const MIN_DELAY = 0.9;
-const MAX_DELAY = 3;
+const MAX_DELAY = 4;
+const SHORT = 3; // pieces of fewer frames than this are not made
+
+export function canShowVideo(): boolean {
+  if (typeof window === "undefined") return false;
+  const scope = window as unknown as { MediaSource?: typeof MediaSource; ManagedMediaSource?: typeof MediaSource };
+  const Source = scope.MediaSource ?? scope.ManagedMediaSource;
+  return Boolean(Source && Source.isTypeSupported(TYPE));
+}
 
 type Segment = {
-  audioStart: number; // when this chunk was spoken, on the audio clock
+  audioStart: number; // when this piece was spoken, on the audio clock
   length: number; // seconds
   mediaStart: number; // where its video sits in the joined video; -1 until it is in
 };
+
+// Where her voice comes from: a call's audio stream, or a node of the
+// audio graph the Play button builds (which then must not be connected to
+// the speakers itself).
+export type Voice =
+  | { stream: MediaStream }
+  | { context: AudioContext; node: AudioNode };
 
 const tail = (samples: Int16Array, count: number) =>
   samples.length > count ? samples.slice(samples.length - count) : samples;
@@ -67,6 +83,9 @@ function wav(pcm: Int16Array, rate: number): Uint8Array {
   new Int16Array(out.buffer, 44).set(pcm);
   return out;
 }
+
+// The capture code is added to an audio context once.
+const withCapture = new WeakSet<AudioContext>();
 
 // Silent video pieces joined end to end. Nothing plays by itself: the
 // caller moves the picture.
@@ -142,6 +161,9 @@ class Reel {
 
 export class LiveTalk {
   private context: AudioContext | null = null;
+  private ownsContext = false;
+  private nodes: AudioNode[] = [];
+  private source: AudioNode | null = null;
   private delay: DelayNode | null = null;
   private reel: Reel | null = null;
   private clock = 0;
@@ -154,11 +176,13 @@ export class LiveTalk {
   private recent: Int16Array = new Int16Array(0); // the latest sound, for lead and pre-roll
   private pending: Int16Array = new Int16Array(0); // her line so far, not yet sent
   private pendingAt = 0; // sample number where `pending` starts
-  private talking = false;
+  private talking = false; // she is in the middle of a line
+  private drawing = false; // her voice is being sent to be drawn
   private quiet = 0; // samples of silence in a row
+  private lines = 0; // lines she has begun
+  // For the report: how the drawing kept up with her voice.
+  private count = { asked: 0, joined: 0, due: 0, shown: 0 };
 
-  private frame = 0; // which frame of the loop the next piece starts on
-  private newLine = true; // the next piece is the first of a line
   private segments: Segment[] = [];
   private order: Promise<void> = Promise.resolve();
   private hold = FIRST_DELAY;
@@ -167,17 +191,32 @@ export class LiveTalk {
   private missingSince = 0;
   private directFailed = false; // the box could not be reached from here
 
+  // greet: her first line is a hello (a call); she waves with it.
   constructor(
     private stage: Stage,
-    private voice: MediaStream,
-    private onFail: () => void
+    private voice: Voice,
+    private onFail: () => void,
+    private greet = false
   ) {}
 
   async start() {
-    const context = new AudioContext();
+    let context: AudioContext;
+    let source: AudioNode;
+    if ("stream" in this.voice) {
+      context = new AudioContext();
+      this.ownsContext = true;
+      source = context.createMediaStreamSource(this.voice.stream);
+    } else {
+      context = this.voice.context;
+      source = this.voice.node;
+    }
     this.context = context;
+    this.source = source;
     this.rate = context.sampleRate / 2;
-    await context.audioWorklet.addModule("/pcm-worklet.js");
+    if (!withCapture.has(context)) {
+      await context.audioWorklet.addModule("/pcm-worklet.js");
+      withCapture.add(context);
+    }
     if (this.stopped) return;
 
     const reel = new Reel(this.stage.video);
@@ -185,7 +224,6 @@ export class LiveTalk {
     this.order = reel.open();
     this.order.catch(() => this.fail());
 
-    const source = context.createMediaStreamSource(this.voice);
     // Her voice, played late by `hold` seconds.
     const delay = context.createDelay(MAX_DELAY + 1);
     delay.delayTime.value = this.hold;
@@ -196,11 +234,30 @@ export class LiveTalk {
     capture.port.onmessage = ({ data }: MessageEvent<ArrayBuffer>) =>
       this.hear(new Int16Array(data));
     source.connect(capture);
+    // Kept running through silence too (a node with no live input stops
+    // being asked for sound): a clip in which her mouth moves must go on
+    // being redrawn after her voice has ended.
+    const hush = context.createConstantSource();
+    hush.offset.value = 0;
+    hush.connect(capture);
+    hush.start();
+    this.nodes = [delay, capture, hush];
 
     this.clock = window.setInterval(() => this.tick(), 40);
     // A first, silent piece: it wakes the route to the GPU and shows how
     // long a piece takes before she has said anything.
     this.probe();
+  }
+
+  // How long after her voice has all been handed over she is still
+  // speaking (the held-back sound playing out), in milliseconds.
+  get tail() {
+    return (this.hold + 0.5) * 1000;
+  }
+
+  // Still drawing, or still showing what was drawn.
+  get busy() {
+    return this.drawing || this.showing;
   }
 
   stop() {
@@ -209,26 +266,43 @@ export class LiveTalk {
     this.reel?.close();
     this.reel = null;
     this.show(false);
-    this.context?.close().catch(() => {});
+    this.stage.talking(false);
+    for (const node of this.nodes) {
+      try {
+        this.source?.disconnect(node);
+      } catch {}
+      node.disconnect();
+    }
+    this.nodes = [];
+    if (this.ownsContext) this.context?.close().catch(() => {});
     this.context = null;
   }
 
-  // For checking a call from the browser console.
+  // How it went, for the report the page sends when she has finished and
+  // for checking from the browser console.
   describe() {
+    const sorted = [...this.needed].sort((x, y) => x - y);
+    const round = (n: number) => Math.round(n * 100) / 100;
     return {
-      hold: this.hold,
-      needed: this.needed.map((n) => Math.round(n * 100) / 100),
-      segments: this.segments.length,
-      frame: this.frame,
-      talking: this.talking,
-      showing: this.showing,
+      hold: round(this.hold),
+      pieceSecondsMedian: sorted.length ? round(sorted[Math.floor(sorted.length / 2)]) : null,
+      pieceSecondsMax: sorted.length ? round(sorted[sorted.length - 1]) : null,
+      asked: this.count.asked,
+      joined: this.count.joined,
+      // Of the moments her voice was heard, the share with her lips drawn.
+      lipsShare: this.count.due ? round(this.count.shown / this.count.due) : null,
+      lines: this.lines,
+      outputLatency: round(this.context?.outputLatency || this.context?.baseLatency || 0),
+      rate: this.context?.sampleRate ?? null,
       failed: this.failed,
       direct: Boolean(avatarBus.direct) && !this.directFailed,
+      talking: this.talking,
+      showing: this.showing,
     };
   }
 
-  private async request(chunk: Int16Array, lead: Int16Array, start: number) {
-    const leadMs = Math.round((lead.length / this.rate) * 1000);
+  private async request(audio: Int16Array, leadSamples: number, clip: string, start: number) {
+    const leadMs = Math.round((leadSamples / this.rate) * 1000);
     // Straight to the GPU box when the browser can reach it: the way
     // through the app is slower. A body with no type keeps the browser
     // from asking the box for permission before every chunk.
@@ -236,8 +310,8 @@ export class LiveTalk {
     if (direct) {
       try {
         const res = await fetch(
-          `${direct.url}/speak?clip=talk&start=${start}&lead_ms=${leadMs}&audio=0&t=${direct.token}`,
-          { method: "POST", body: new Blob([new Uint8Array(wav(join(lead, chunk), this.rate))]) }
+          `${direct.url}/speak?clip=${clip}&start=${start}&lead_ms=${leadMs}&audio=0&t=${direct.token}`,
+          { method: "POST", body: new Blob([new Uint8Array(wav(audio, this.rate))]) }
         );
         if (!res.ok) throw new Error(`video chunk failed (${res.status})`);
         return new Uint8Array(await res.arrayBuffer());
@@ -245,10 +319,10 @@ export class LiveTalk {
         this.directFailed = true;
       }
     }
-    const res = await fetch(`/api/avatar/chunk?start=${start}&lead=${leadMs}`, {
+    const res = await fetch(`/api/avatar/chunk?clip=${clip}&start=${start}&lead=${leadMs}`, {
       method: "POST",
       headers: { "Content-Type": "audio/wav" },
-      body: new Uint8Array(wav(join(lead, chunk), this.rate)),
+      body: new Uint8Array(wav(audio, this.rate)),
     });
     if (!res.ok) throw new Error(`video chunk failed (${res.status})`);
     return new Uint8Array(await res.arrayBuffer());
@@ -257,8 +331,12 @@ export class LiveTalk {
   private probe() {
     const began = performance.now();
     const silence = new Int16Array(Math.round(CHUNK * this.rate));
-    this.request(silence, new Int16Array(0), 0)
-      .then(() => this.needed.push(CHUNK + (performance.now() - began) / 1000))
+    const spot = this.stage.director.at(stageClock());
+    this.request(silence, 0, spot.unit.name, 0)
+      .then(() => {
+        this.needed.push(CHUNK + (performance.now() - began) / 1000);
+        this.adapt();
+      })
       .catch(() => this.fail());
   }
 
@@ -282,73 +360,128 @@ export class LiveTalk {
     this.heard += half.length;
     const loud = Math.sqrt(sum / half.length) > LOUD;
 
-    if (!this.talking) {
-      if (!loud) {
+    // Is she in the middle of a line? (Her body gestures while she is.)
+    if (loud) {
+      if (!this.talking) {
+        this.talking = true;
+        if (this.greet && this.lines === 0) this.stage.director.greet = true;
+        this.lines += 1;
+        this.stage.talking(true);
+      }
+      this.quiet = 0;
+    } else if (this.talking) {
+      this.quiet += half.length;
+      if (this.quiet >= QUIET * this.rate) {
+        this.talking = false;
+        this.stage.talking(false);
+      }
+    }
+
+    // In some gesture clips her own mouth moves. Such a clip is redrawn for
+    // as long as it is on screen, sound or no sound, so that she is never
+    // seen mouthing words nobody hears.
+    const lag = this.hold + (context.outputLatency || context.baseLatency || 0);
+    const seen = this.firstAt + at / this.rate + lag + (stageClock() - context.currentTime);
+    const cover = this.stage.director.at(seen).unit.mouths === true;
+    const active = this.talking || cover;
+
+    if (!this.drawing) {
+      if (!active) {
         this.recent = tail(join(this.recent, half), Math.round((LEAD + PRE_ROLL) * this.rate));
         return;
       }
-      // She starts a line. The sound just before holds the very start of
-      // her first word.
+      // Drawing begins. The sound just before holds the very start of her
+      // first word.
       const before = Math.min(this.recent.length, Math.round(PRE_ROLL * this.rate));
       this.pending = join(this.recent.slice(this.recent.length - before), half);
       this.pendingAt = at - before;
       this.recent = this.recent.slice(0, this.recent.length - before);
-      this.talking = true;
-      this.newLine = true;
-      this.quiet = 0;
+      this.drawing = true;
     } else {
       this.pending = join(this.pending, half);
-      this.quiet = loud ? 0 : this.quiet + half.length;
     }
 
     const size = Math.round(CHUNK * this.rate);
     while (this.pending.length >= size) this.send(size);
-    if (this.quiet >= QUIET * this.rate) {
+    if (!active) {
       if (this.pending.length) this.send(this.pending.length);
-      this.talking = false;
+      this.drawing = false;
     }
   }
 
-  // Sends the first `count` samples of her line to be drawn. Answers may
-  // come back in any order; they are joined in the order they were sent.
+  // Sends the first `count` samples of her line to be drawn, on the frames
+  // of the clip that will be showing when they are heard. A chunk that
+  // runs over the end of a clip is drawn in two pieces, one on each clip.
+  // Answers may come back in any order; they are joined in the order sent.
   private send(count: number) {
     const reel = this.reel;
     const context = this.context;
     if (!reel || !context) return;
     const chunk = this.pending.slice(0, count);
     const lead = tail(this.recent, Math.round(LEAD * this.rate));
+    const sound = join(lead, chunk); // the chunk with the sound before it
     this.pending = this.pending.slice(count);
     this.recent = tail(join(this.recent, chunk), Math.round((LEAD + PRE_ROLL) * this.rate));
 
-    const segment: Segment = {
-      audioStart: this.firstAt + this.pendingAt / this.rate,
-      length: count / this.rate,
-      mediaStart: -1,
-    };
+    const audioStart = this.firstAt + this.pendingAt / this.rate;
     this.pendingAt += count;
-    this.segments.push(segment);
 
-    if (this.newLine) {
-      // The first piece of a line: start on the frame the loop will show
-      // when this piece is heard.
-      this.newLine = false;
-      const lag = this.hold + (context.outputLatency || context.baseLatency || 0);
-      const ahead = segment.audioStart + lag - context.currentTime;
-      this.frame = loopFrame(this.stage.base, ahead);
+    // When this chunk will be seen, on the director's clock.
+    const lag = this.hold + (context.outputLatency || context.baseLatency || 0);
+    let seen = audioStart + lag + (stageClock() - context.currentTime);
+    let frames = Math.ceil((count / this.rate) * FPS - 0.001);
+    let taken = 0; // samples of the chunk already given to a piece
+
+    while (frames > 0) {
+      let spot = this.stage.director.at(seen);
+      if (spot.left < frames && spot.left < SHORT) {
+        // Hardly anything of this clip is left: begin on the next one.
+        seen += spot.left / FPS;
+        spot = this.stage.director.at(seen);
+      }
+      let take = Math.min(frames, spot.left);
+      // A remainder too short for a piece of its own stays with this one.
+      if (frames - take > 0 && frames - take < SHORT) take = frames;
+      const last = take === frames;
+      const samples = last ? count - taken : Math.round((take / FPS) * this.rate);
+      const from = lead.length + taken;
+      const context0 = Math.max(0, from - lead.length);
+      this.piece(
+        reel,
+        context,
+        sound.slice(context0, from + samples),
+        from - context0,
+        { audioStart: audioStart + taken / this.rate, length: samples / this.rate, mediaStart: -1 },
+        spot.unit.name,
+        spot.frame
+      );
+      taken += samples;
+      frames -= take;
+      seen += take / FPS;
     }
-    const start = this.frame;
-    this.frame += Math.ceil(segment.length * 25 - 0.001);
+  }
 
-    const answer = this.request(chunk, lead, start);
+  private piece(
+    reel: Reel,
+    context: AudioContext,
+    audio: Int16Array,
+    leadSamples: number,
+    segment: Segment,
+    clip: string,
+    start: number
+  ) {
+    this.segments.push(segment);
+    this.count.asked += 1;
+    const answer = this.request(audio, leadSamples, clip, start);
     // Without this a failed answer would be reported as unhandled before
     // its turn in the order comes.
     answer.catch(() => {});
-
     this.order = this.order
       .then(() => answer)
-      .then((piece) => reel.append(piece))
+      .then((video) => reel.append(video))
       .then((mediaStart) => {
         segment.mediaStart = mediaStart;
+        this.count.joined += 1;
         this.needed.push(context.currentTime - segment.audioStart);
         if (this.needed.length > 30) this.needed.shift();
       })
@@ -370,6 +503,10 @@ export class LiveTalk {
       (s) => s.audioStart <= now && now < s.audioStart + s.length
     );
 
+    if (segment) {
+      this.count.due += 1;
+      if (segment.mediaStart >= 0) this.count.shown += 1;
+    }
     if (segment && segment.mediaStart >= 0) {
       const want = segment.mediaStart + (now - segment.audioStart);
       if (video.paused || Math.abs(video.currentTime - want) > 0.12) {
@@ -389,16 +526,21 @@ export class LiveTalk {
     }
 
     // Between her lines, set the delay to what the pieces really need.
-    const idle = !this.talking && !this.segments.some((s) => s.audioStart + s.length > now);
-    if (idle && this.delay && this.needed.length >= 2) {
-      // Enough for most pieces; the odd slow one shows her idle for a moment.
-      const sorted = [...this.needed].sort((x, y) => x - y);
-      const usual = sorted[Math.floor((sorted.length - 1) * 0.85)];
-      const target = Math.min(MAX_DELAY, Math.max(MIN_DELAY, usual + 0.12));
-      if (Math.abs(target - this.hold) > 0.12) {
-        this.hold = target;
-        this.delay.delayTime.value = target;
-      }
+    const idle = !this.drawing && !this.segments.some((s) => s.audioStart + s.length > now);
+    if (idle) this.adapt();
+  }
+
+  // Sets how long her voice is held back: enough for most pieces to be
+  // back in time; the odd slow one shows her mouth closed for a moment.
+  // Only called while nothing is being heard, so the change is not heard.
+  private adapt() {
+    if (!this.delay || !this.needed.length || this.drawing) return;
+    const sorted = [...this.needed].sort((x, y) => x - y);
+    const usual = sorted[Math.floor((sorted.length - 1) * 0.85)];
+    const target = Math.min(MAX_DELAY, Math.max(MIN_DELAY, usual + 0.15));
+    if (Math.abs(target - this.hold) > 0.12) {
+      this.hold = target;
+      this.delay.delayTime.value = target;
     }
   }
 
@@ -414,4 +556,30 @@ export class LiveTalk {
     this.stop();
     this.onFail();
   }
+}
+
+// Waits until she has finished the gesture she is in the middle of (a clip
+// in which her mouth moves is drawn to its end), a few seconds at most.
+export async function settled(face: LiveTalk) {
+  const until = performance.now() + 7000;
+  while (face.busy && performance.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+}
+
+// Tells the app's server how the lip sync kept up on this device: numbers
+// only (how many pieces, how late, how much of her speech had lips). It is
+// written to the server's log, so a device on which she does not work can
+// be understood without anyone having to describe what they saw.
+export function report(kind: string, face: LiveTalk) {
+  send({ kind, ...face.describe() });
+}
+
+export function send(facts: Record<string, unknown>) {
+  try {
+    navigator.sendBeacon(
+      "/api/avatar/report",
+      new Blob([JSON.stringify(facts)], { type: "application/json" })
+    );
+  } catch {}
 }

@@ -6,7 +6,7 @@ import { IS_BLINK, fetchSpeech, speechRequest } from "@/lib/files";
 import { refreshEngineStatus } from "./EngineStatus";
 import { StreamPlayer } from "@/lib/streamPlayer";
 import { avatarBus } from "@/lib/avatar/bus";
-import { TalkPlayer } from "@/lib/avatar/talkPlayer";
+import { LiveTalk, report, settled } from "@/lib/avatar/liveTalk";
 import s from "./ui/Footer.module.css";
 
 const PlayingWaveform = ({
@@ -126,50 +126,92 @@ export default function PlayButton() {
     };
 
     try {
-      // When she is on screen as photo-real video, she speaks from the GPU
-      // box: picture and voice together. If that cannot be done she is
-      // heard as usual, below.
-      const stage = avatarBus.stage;
-      if (stage) {
-        try {
-          const { init } = await speechRequest();
-          // Her video comes straight from the GPU box when the browser can
-          // reach it; otherwise through this app.
-          if (avatarBus.direct && init.body instanceof FormData) {
-            init.body.set("direct", "1");
-          }
-          const talk = new TalkPlayer(stage.video);
-          analyserRef.current = null;
-          audioRef.current = {
-            pause: () => {
-              talk.stop();
-              stage.follow(false);
-              stage.speaking(false);
-            },
-          };
-          talk.onplay = () => {
-            stage.speaking(true);
-            stage.follow(true);
-            onPlay();
-          };
-          talk.onended = () => {
-            stage.follow(false);
-            stage.speaking(false);
-            onEnded();
-          };
-          talk.onstall = (stalled) => stage.speaking(!stalled);
-          await talk.start("/api/avatar/speak", init);
-          return;
-        } catch (err) {
-          console.warn("No video this time, playing her voice alone:", err);
-          stage.follow(false);
-          stage.speaking(false);
-          audioRef.current = null;
-        }
-      }
-
       // A clip made earlier for the same script and settings is replayed.
       const ready = appStore.getState().latestAudio;
+
+      // When she is on screen as photo-real video, her voice does not go
+      // straight to the speakers: it is played a moment late, in step with
+      // her lips, which the GPU box draws on her moving body (LiveTalk).
+      const stage = avatarBus.stage;
+      if (stage) {
+        if (!audioContextRef.current) {
+          audioContextRef.current = new AudioContext();
+        }
+        const ctx = audioContextRef.current;
+        await ctx.resume();
+        analyserRef.current = null;
+
+        // `voice` is the node her voice comes out of; `direct` connects it
+        // to the speakers if the video cannot be made after all.
+        const withFace = async (voice: AudioNode) => {
+          const face = new LiveTalk(stage, { context: ctx, node: voice }, () =>
+            voice.connect(ctx.destination)
+          );
+          await face.start();
+          return face;
+        };
+
+        if (!ready) {
+          const { init } = await speechRequest();
+          const player = new StreamPlayer(ctx, null);
+          const face = await withFace(player.analyser);
+          audioRef.current = {
+            pause: () => {
+              player.stop();
+              face.stop();
+            },
+          };
+          player.onplay = onPlay;
+          player.onerror = (err) => {
+            face.stop();
+            onError(err);
+          };
+          // Her held-back voice is still playing out when the last of it
+          // has been handed over, and a gesture she is in the middle of is
+          // drawn to its end.
+          player.onended = () =>
+            window.setTimeout(async () => {
+              await settled(face);
+              if (audioRef.current) {
+                report("play", face);
+                face.stop();
+                onEnded();
+              }
+            }, face.tail);
+          player.onaudio = (wav) => appStore.setState({ latestAudio: wav });
+          player.start("/api/generate", init);
+          return;
+        }
+
+        const url = URL.createObjectURL(ready);
+        const audio = new Audio(url);
+        const face = await withFace(ctx.createMediaElementSource(audio));
+        let over = false;
+        const finish = () => {
+          if (over) return;
+          over = true;
+          URL.revokeObjectURL(url);
+          report("replay", face);
+          face.stop();
+          onEnded();
+        };
+        audioRef.current = {
+          pause: () => {
+            audio.pause();
+            finish();
+          },
+        };
+        audio.onplay = onPlay;
+        audio.onerror = () => {
+          face.stop();
+          onError();
+        };
+        audio.onended = () =>
+          window.setTimeout(() => settled(face).then(finish), face.tail);
+        await audio.play();
+        return;
+      }
+
 
       if (IS_BLINK && !ready) {
         // Play each chunk as it arrives, and keep the clip for the Voice

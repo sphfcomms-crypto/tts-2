@@ -111,47 +111,25 @@ export function browserAccess(): { url: string; token: string } | null {
   return { url, token: `${expires}.${signature}` };
 }
 
-// Like gpuSpeak, but the box keeps the video for the browser to fetch and
-// only its name comes back.
-export async function gpuSpeakKept(
-  wav: Uint8Array,
-  start: number,
-  signal?: AbortSignal
-): Promise<{ id: string; next: number }> {
-  const base = gpuAddress();
-  if (!base) throw new Error("the avatar GPU is not connected");
-  const res = await fetch(`${base}/speak?clip=talk&start=${start}&keep=1`, {
-    method: "POST",
-    headers: { "x-avatar-key": gpuKey(), "Content-Type": "audio/wav" },
-    body: new Uint8Array(wav),
-    signal: signal
-      ? AbortSignal.any([signal, AbortSignal.timeout(90_000)])
-      : AbortSignal.timeout(90_000),
-  });
-  if (!res.ok) {
-    health = null;
-    throw new Error(`the avatar GPU answered ${res.status}`);
-  }
-  const body = (await res.json()) as { id?: string; next?: number };
-  if (!body.id) throw new Error("the avatar GPU kept no piece");
-  return { id: body.id, next: Number(body.next) || 0 };
-}
-
-// One piece of her speech (a WAV file) in, video of her saying it out.
-// `start` is where in her movement this piece begins; `next` is where the
-// following piece should begin, so her body carries on without a jump.
+// A piece of her speech (a WAV file) in, video of her saying it out, drawn
+// on the frames of `clip` from frame `start` on.
 // `lead` milliseconds at the start of the WAV are earlier sound, given only
 // as context: they are not drawn. With `sound: false` the video comes back
 // silent (a live call plays her voice itself).
 export async function gpuSpeak(
   wav: Uint8Array,
   start: number,
-  { lead = 0, sound = true, signal }: { lead?: number; sound?: boolean; signal?: AbortSignal } = {}
+  {
+    clip = "talk",
+    lead = 0,
+    sound = true,
+    signal,
+  }: { clip?: string; lead?: number; sound?: boolean; signal?: AbortSignal } = {}
 ): Promise<{ video: Uint8Array; next: number }> {
   const base = gpuAddress();
   if (!base) throw new Error("the avatar GPU is not connected");
   const query =
-    `clip=talk&start=${start}` +
+    `clip=${clip}&start=${start}` +
     (lead ? `&lead_ms=${lead}` : "") +
     (sound ? "" : "&audio=0");
   const res = await fetch(`${base}/speak?${query}`, {
