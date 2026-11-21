@@ -1,4 +1,4 @@
-import { avatarBus, Stage } from "./bus";
+import { avatarBus, loopFrame, Stage } from "./bus";
 
 // Her on video during a live call.
 //
@@ -11,7 +11,9 @@ import { avatarBus, Stage } from "./bus";
 //     of her saying it;
 //   - the video pieces are joined, and a clock keeps the picture on the
 //     piece that belongs to the sound being heard at that moment.
-// Between her lines no video is made and the idle picture shows.
+// Between her lines no video is made and the listening loop shows. Each
+// line is drawn from the frame the loop will have reached when the line is
+// heard, so her mouth simply starts and stops moving in the same take.
 //
 // If a piece is not back in time, she is shown idle for that moment rather
 // than out of step. The delay adjusts itself, between her lines, to how
@@ -155,7 +157,8 @@ export class LiveTalk {
   private talking = false;
   private quiet = 0; // samples of silence in a row
 
-  private frame = 0; // where in her movement the next piece starts
+  private frame = 0; // which frame of the loop the next piece starts on
+  private newLine = true; // the next piece is the first of a line
   private segments: Segment[] = [];
   private order: Promise<void> = Promise.resolve();
   private hold = FIRST_DELAY;
@@ -291,6 +294,7 @@ export class LiveTalk {
       this.pendingAt = at - before;
       this.recent = this.recent.slice(0, this.recent.length - before);
       this.talking = true;
+      this.newLine = true;
       this.quiet = 0;
     } else {
       this.pending = join(this.pending, half);
@@ -324,6 +328,14 @@ export class LiveTalk {
     this.pendingAt += count;
     this.segments.push(segment);
 
+    if (this.newLine) {
+      // The first piece of a line: start on the frame the loop will show
+      // when this piece is heard.
+      this.newLine = false;
+      const lag = this.hold + (context.outputLatency || context.baseLatency || 0);
+      const ahead = segment.audioStart + lag - context.currentTime;
+      this.frame = loopFrame(this.stage.base, ahead);
+    }
     const start = this.frame;
     this.frame += Math.ceil(segment.length * 25 - 0.001);
 

@@ -143,14 +143,17 @@ export default function PlayButton() {
           audioRef.current = {
             pause: () => {
               talk.stop();
+              stage.follow(false);
               stage.speaking(false);
             },
           };
           talk.onplay = () => {
             stage.speaking(true);
+            stage.follow(true);
             onPlay();
           };
           talk.onended = () => {
+            stage.follow(false);
             stage.speaking(false);
             onEnded();
           };
@@ -159,6 +162,7 @@ export default function PlayButton() {
           return;
         } catch (err) {
           console.warn("No video this time, playing her voice alone:", err);
+          stage.follow(false);
           stage.speaking(false);
           audioRef.current = null;
         }

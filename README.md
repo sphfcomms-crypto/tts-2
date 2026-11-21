@@ -61,10 +61,14 @@ came back as unreadable rather than as made-up text.
 "Show her" in Settings puts her at the top of the page, in one of two forms.
 
 **On video (photo-real), while a GPU box is running.** She is a fictional
-woman: one generated still and three short generated clips of her (waiting,
-thinking, and a closed-mouth clip with natural head movement). A GPU box
-(`avatar-gpu/`, MuseTalk 1.5) redraws her mouth to match each piece of
-speech, about four times faster than real time on one L40S.
+woman: one generated still and two short generated clips of her (thinking,
+and listening with natural head movement and a closed mouth). A GPU box
+(`avatar-gpu/`, MuseTalk 1.5) redraws her mouth on the listening clip to
+match each piece of speech, about four times faster than real time on one
+L40S. The browser plays the same listening clip as a loop underneath
+(`public/avatar/video/listen.mp4`) and asks for her speech to be drawn from
+the frame the loop is on, so speaking and listening are one continuous
+take: her mouth starts and stops, nothing else changes.
 
 - Play: the voice is made as usual, each piece goes to the box, and the
   browser joins the returned video pieces (voice inside) into one video.
