@@ -161,6 +161,7 @@ def silence_gate(wav16, lead16, n_frames):
     x = np.pad(x, (0, total * 640 - len(x)))
     silent = np.sqrt((x.reshape(total, 640) ** 2).mean(1)) < SILENCE_RMS
     g = np.zeros(total, np.float32)
+    onsets = [0]
     i = 0
     while i < total:
         if not silent[i]:
@@ -177,15 +178,36 @@ def silence_gate(wav16, lead16, n_frames):
                 if i + 1 <= j:
                     g[i + 1] = 0.5
             if not open_right:
+                onsets.append(j + 1)
                 g[j] = 0.0
                 if j - 1 >= i:
                     g[j - 1] = min(g[j - 1], 0.5)
         i = j + 1
+    # One frame can contain both rest and the beginning of a sound. Recover
+    # that quiet half-frame at the start of the recording or after a real
+    # pause, including one in the supplied lead-in. Ignore inner-word dips.
+    for index in onsets:
+        halves = x[index * 640:(index + 1) * 640].reshape(2, 320)
+        first, second = np.sqrt((halves ** 2).mean(1))
+        if first < SILENCE_RMS and second > max(first * 2, SILENCE_RMS):
+            g[index] = max(g[index], 1 - first / second)
     g = g[before:before + n_frames]
     return g if g.any() else None
 
 
 # ----------------------------------------------------------------------------- clips
+
+def source_lip_rest(landmarks):
+    """Use the source lips at rest only when all three inner-lip gaps are closed."""
+    corners = landmarks[:, 54] - landmarks[:, 48]
+    width = np.linalg.norm(corners, axis=1)
+    normal = np.stack([-corners[:, 1], corners[:, 0]], axis=1)
+    across = landmarks[:, [67, 66, 65]] - landmarks[:, [61, 62, 63]]
+    # Measure perpendicular to the lips so head roll cannot widen the gap.
+    aperture = abs((across * normal[:, None, :]).sum(2)).max(1) / np.maximum(width ** 2, 1)
+    valid = np.isfinite(aperture) & (width >= 8)
+    return np.where(valid, np.clip((0.055 - aperture) / 0.035, 0, 1), 0).astype(np.float32)
+
 
 class Clip:
     def __init__(self, folder, dev):
@@ -211,6 +233,13 @@ class Clip:
         self.latents = torch.from_numpy(np.load(os.path.join(folder, "latents.npy"))).to(dev, torch.float16)
         self.alpha = torch.from_numpy(np.load(os.path.join(folder, "alpha.npy"))).to(dev)
         self.theta = torch.from_numpy(np.load(os.path.join(folder, "theta.npy"))).to(dev, torch.float32)
+        rest = np.zeros(n, np.float32)
+        landmark_path = os.path.join(folder, "landmarks.npy")
+        if os.path.isfile(landmark_path):
+            landmarks = np.load(landmark_path)
+            if landmarks.shape == (n, 68, 2):
+                rest = source_lip_rest(landmarks)
+        self.source_rest = torch.from_numpy(rest).to(dev)
         self.kbps = int(round(KBPS_AT_960x720 * (w * h) / (960 * 720) / 50.0) * 50)
 
     def frame_at(self, pos):
@@ -482,7 +511,7 @@ class Engine:
 
     # -- one batch of frames ---------------------------------------------------------------------------
     @torch.inference_mode()
-    def render(self, clip, frame_ids, feats, tm):
+    def render(self, clip, frame_ids, feats, tm, rest=None):
         sync = torch.cuda.synchronize
         t0 = time.perf_counter()
         idx = torch.as_tensor(frame_ids, device=self.dev)
@@ -508,6 +537,11 @@ class Engine:
         cb = F.avg_pool2d((128.0 + 112.0 * (bl - luma) / (1.0 - KB))[:, None], 2)[:, 0]
         cr = F.avg_pool2d((128.0 + 112.0 * (r - luma) / (1.0 - KR))[:, None], 2)[:, 0]
         a = clip.alpha[idx].float() * (1.0 / 255.0)
+        if rest is not None:
+            # In an audible pause, ease back to the actual skin and closed lips
+            # of this exact source frame. A visibly open source still uses the
+            # model's calibrated closure.
+            a *= (1 - rest * clip.source_rest[idx])[:, None, None]
         a2 = F.avg_pool2d(a[:, None], 2)[:, 0]
 
         # blend in YUV: where the mask is 0 the picture stays bit-exact
@@ -534,16 +568,22 @@ class Engine:
                 job.tm["queue"] = time.perf_counter() - job.t_recv
                 t = time.perf_counter()
                 feats = self.audio_features(job.wav16, job.lead_steps, job.n_frames)
-                if self.closed is not None and job.gate is not None:
-                    g = torch.from_numpy(job.gate).to(self.dev, torch.float16)[:, None, None]
-                    feats = feats + (self.closed - feats) * g
+                rest = None
+                if job.gate is not None:
+                    rest = torch.from_numpy(job.gate).to(self.dev)
+                    if self.closed is not None:
+                        g = rest.to(feats.dtype)[:, None, None]
+                        feats = feats + (self.closed - feats) * g
                 torch.cuda.synchronize()
                 job.tm["feat"] = time.perf_counter() - t
                 done = 0
                 while done < job.n_frames:
                     bs = min(FIRST_BATCH if done == 0 else BATCH, job.n_frames - done)
                     ids = [job.clip.frame_at(job.start + done + k) for k in range(bs)]
-                    job.frames_q.put((ids, self.render(job.clip, ids, feats[done:done + bs], job.tm)))
+                    window = slice(done, done + bs)
+                    rendered = self.render(job.clip, ids, feats[window], job.tm,
+                                           rest[window] if rest is not None else None)
+                    job.frames_q.put((ids, rendered))
                     done += bs
                 job.tm["gpu_done"] = time.perf_counter() - job.t_recv
                 job.frames_q.put(None)
