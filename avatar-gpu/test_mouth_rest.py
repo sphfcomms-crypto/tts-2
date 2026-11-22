@@ -26,6 +26,17 @@ class MouthRestTest(unittest.TestCase):
         np.testing.assert_array_equal(gate[1:], 0)
         self.assertIsNone(silence_gate(samples, 640, 11))
 
+    def test_gentle_release_is_limited_to_the_quiet_rising_frame(self):
+        samples = np.full(640 * 8, 0.08, np.float32)
+        samples[:320] = 0.001
+        samples[320:640] = 0.006
+        samples[640:1280] = 0.012
+        gate = silence_gate(samples, 0, 8)
+        self.assertGreater(gate[0], gate[1])
+        self.assertGreater(gate[1], 0)
+        self.assertLess(gate[1], 0.6)
+        np.testing.assert_array_equal(gate[2:], 0)
+
     def test_pause_returns_to_rest_without_spending_context_frames(self):
         samples = np.full(640 * 14, 0.08, np.float32)
         samples[3 * 640:10 * 640] = 0

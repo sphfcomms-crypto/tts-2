@@ -190,7 +190,16 @@ def silence_gate(wav16, lead16, n_frames):
         halves = x[index * 640:(index + 1) * 640].reshape(2, 320)
         first, second = np.sqrt((halves ** 2).mean(1))
         if first < SILENCE_RMS and second > max(first * 2, SILENCE_RMS):
-            g[index] = max(g[index], 1 - first / second)
+            onset_rest = 1 - first / second
+            g[index] = max(g[index], onset_rest)
+            if index + 2 < total:
+                soft, following = np.sqrt((x[(index + 1) * 640:(index + 3) * 640]
+                                           .reshape(2, 640) ** 2).mean(1))
+                # A breathy vowel may take another frame to reach normal
+                # loudness. Let the jaw travel partway there. A plosive
+                # that is already loud keeps its original release frame.
+                if soft < 6 * SILENCE_RMS and following > soft * 1.6:
+                    g[index + 1] = max(g[index + 1], min(0.60 * onset_rest, 1 - soft / following))
     g = g[before:before + n_frames]
     return g if g.any() else None
 
