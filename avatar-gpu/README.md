@@ -57,6 +57,13 @@ The platform has the same switch, and it is the one that acts first: a box is re
 running server does not count as work: a box rented with 10 ended fifteen minutes after her last
 speech with the server up and its model loaded.
 
+## The clips the browser plays (`GET /clip/<name>.mp4`)
+
+The browser plays her body-language clips from memory and needs them whole and quickly. The app's
+own line was measured slower than the clips play, so the box serves the same files, without a key:
+`web/units/<name>.mp4`, copied from the app by `start.sh` when they are missing (delete the folder
+to have them copied again after the clips change). `patch_clips.py` made this edit; it is applied.
+
 ## JupyterLab on the box (`jupyter.sh`)
 
 ```

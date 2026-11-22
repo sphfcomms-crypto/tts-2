@@ -53,6 +53,7 @@ export type Trace = Segment & {
   lag: number; // seconds between the sound being captured and being heard
   clip: string; // the body-language clip it was drawn on
   frame: number; // and the first frame of that clip
+  took: number; // seconds from its first sound being captured to its video being in
 };
 
 // Where her voice comes from: a call's audio stream, or a node of the
@@ -509,7 +510,13 @@ export class LiveTalk {
       .then((mediaStart) => {
         segment.mediaStart = mediaStart;
         this.count.joined += 1;
-        this.history.push({ ...segment, lag, clip, frame: start });
+        this.history.push({
+          ...segment,
+          lag,
+          clip,
+          frame: start,
+          took: context.currentTime - segment.audioStart,
+        });
         if (this.history.length > 600) this.history.shift();
         this.needed.push(context.currentTime - segment.audioStart);
         if (this.needed.length > 30) this.needed.shift();

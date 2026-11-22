@@ -68,9 +68,19 @@ thoughtful look (`public/avatar/video/units/`). Every clip starts and ends
 in the same seated pose, so any one can follow any other.
 
 - A director in the browser (`src/lib/avatar/director.ts`) plays the clips
-  back to back and picks each next one by what she is doing: gestures while
-  she talks, a wave with her first line of a call, a thoughtful look while
-  an answer is being made, otherwise listening.
+  and picks each next one by what she is doing: gestures while she talks, a
+  wave with her first line of a call, a thoughtful look while an answer is
+  being made, otherwise listening. It does not wait for a clip to end: it is
+  told the moment she begins a line, about a second before her voice is
+  heard, and cuts to a gesture that starts with her voice; when she stops,
+  the gesture is wrapped up (the picture skips, through a short dissolve,
+  to where her hands go back to her lap). `units.json` says, for each clip,
+  at which frame its movement begins and from which frame she returns to
+  rest.
+- The clips are fetched whole and played from memory, from the GPU box's
+  address when it has them (`GET /clip/<name>.mp4`) and from this app
+  otherwise. Streamed over this app's line, which is slower than the clips
+  play, she froze.
 - Her lips are drawn by a GPU box (`avatar-gpu/`, MuseTalk 1.5) on the very
   frames that are playing (`src/lib/avatar/liveTalk.ts`): her voice, from
   Play or from a live call, is held back about a second and cut into 0.4 s
@@ -89,8 +99,14 @@ in the same seated pose, so any one can follow any other.
   on that device (pieces asked and joined, how late, the share of her
   speech that had lips) to `POST /api/avatar/report`, which writes one line
   to the server log.
-- Her gestures are not chosen from the meaning of her words, and one
-  begins only when the clip before it has ended (up to five seconds).
+- Her gestures are not chosen from the meaning of her words: any gesture
+  goes with any sentence.
+- How well it works is measured, not judged by eye: `avatar-build/measure/`
+  records the live page at real speed in a real browser (every picture and
+  every sample of sound, on one clock) and compares her lips with her voice
+  picture by picture. On the live site on 2026-11-22: Play, the picture
+  within 3 ms of her voice throughout; a call, within 45 ms for 98% of the
+  time; idle, 25 pictures a second with no stalls.
 
 **As a photo-real 3D head, when no box is running.** The same woman, made
 from one picture of her by LAM (a model that turns a portrait into a head of
