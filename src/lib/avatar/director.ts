@@ -41,7 +41,7 @@ export type Unit = {
 
 export const FPS = 25;
 // How long a dissolve between two different poses takes, in milliseconds.
-export const DISSOLVE = 220;
+export const DISSOLVE = 140;
 // How far ahead the next units are always decided. Speech is drawn about a
 // second before it is seen, so the plan must reach further than that.
 const AHEAD = 2.6;
@@ -60,10 +60,17 @@ type Slot = {
   to: number; // one past the last frame shown
   soft: boolean; // the picture before it is in another pose: dissolve into it
   shown: boolean;
+  wrap?: boolean; // her way back to rest after a movement was cut short
 };
 
 // The director's clock, in seconds.
 export const stageClock = () => performance.now() / 1000;
+
+// The speed at which a video that is `behind` seconds late (or early, when
+// negative) closes the gap without the picture jumping: up to 15% faster
+// or slower.
+export const nudge = (behind: number) =>
+  Math.abs(behind) < 0.012 ? 1 : 1 + Math.max(-0.15, Math.min(0.15, behind * 2));
 
 const suits = (unit: Unit, want: Want) =>
   want === "talk" ? unit.pool === "talk" || unit.pool === "greet" : unit.pool === want;
@@ -149,7 +156,8 @@ export class Director {
     }
     this.slots = this.slots.filter((slot) => slot.start <= current.start);
     this.softNext = false;
-    if (suits(current.unit, want)) return;
+    // On her way back to rest she is left alone: what suits her now follows.
+    if (suits(current.unit, want) || current.wrap) return;
 
     const unit = current.unit;
     const rise = unit.rise ?? unit.frames;
@@ -168,6 +176,13 @@ export class Director {
       frame = current.from + Math.ceil((when - current.start) * FPS);
     }
     if (current.to - frame < SHORTEST) return; // it is over in a moment anyway
+    if (!current.shown && frame - current.from < SHORTEST) {
+      // It has not begun and would only flash by: leave it out altogether.
+      this.slots = this.slots.filter((slot) => slot !== current);
+      this.softNext = current.soft;
+      if (unit.pool === "greet") this.greet = true;
+      return;
+    }
 
     if (moving && frame > rise) {
       if (frame >= release - SHORTEST) return; // already on her way back
@@ -180,6 +195,7 @@ export class Director {
         to: unit.frames,
         soft: true,
         shown: false,
+        wrap: true,
       });
       return;
     }
@@ -267,6 +283,7 @@ export class Director {
       const video = this.players[back];
       const want = due.from / FPS + Math.max(0, t - due.start);
       if (Math.abs(video.currentTime - want) > 0.04) video.currentTime = want;
+      video.playbackRate = 1;
       video.play().catch(() => {});
       this.show(back, due.soft);
       const old = this.players[this.front];
@@ -293,7 +310,13 @@ export class Director {
     const video = this.players[this.front];
     const want = current.from / FPS + (t - current.start);
     if (t < this.end(current) && !video.seeking && video.readyState >= 2) {
-      if (Math.abs(video.currentTime - want) > 0.12) video.currentTime = want;
+      const behind = want - video.currentTime;
+      if (Math.abs(behind) > 0.12) {
+        video.currentTime = want;
+        video.playbackRate = 1;
+      } else {
+        video.playbackRate = nudge(behind);
+      }
       if (video.paused) video.play().catch(() => {});
     }
   }

@@ -1,5 +1,5 @@
 import { avatarBus, Stage } from "./bus";
-import { FPS, stageClock } from "./director";
+import { FPS, nudge, stageClock } from "./director";
 
 // Her lips, drawn on her moving body, for any voice that plays: a live call
 // or a script from the Play button.
@@ -538,8 +538,14 @@ export class LiveTalk {
     }
     if (segment && segment.mediaStart >= 0) {
       const want = segment.mediaStart + (now - segment.audioStart);
-      if (video.paused || Math.abs(video.currentTime - want) > 0.12) {
+      const behind = want - video.currentTime;
+      if (video.paused || Math.abs(behind) > 0.15) {
         video.currentTime = want;
+        video.playbackRate = 1;
+      } else {
+        // A small error is closed by playing a touch faster or slower,
+        // which is not seen; a jump of the picture would be.
+        video.playbackRate = nudge(behind);
       }
       if (video.paused) video.play().catch(() => {});
       this.missingSince = 0;
@@ -565,8 +571,8 @@ export class LiveTalk {
   private adapt() {
     if (!this.delay || !this.needed.length || this.drawing) return;
     const sorted = [...this.needed].sort((x, y) => x - y);
-    const usual = sorted[Math.floor((sorted.length - 1) * 0.85)];
-    const target = Math.min(MAX_DELAY, Math.max(MIN_DELAY, usual + 0.15));
+    const usual = sorted[Math.floor((sorted.length - 1) * 0.92)];
+    const target = Math.min(MAX_DELAY, Math.max(MIN_DELAY, usual + 0.2));
     if (Math.abs(target - this.hold) > 0.12) {
       this.hold = target;
       this.delay.delayTime.value = target;
