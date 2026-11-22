@@ -1,11 +1,12 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Play } from "./ui/Icons";
 import { Button } from "./ui/Button";
 import { appStore } from "@/lib/store";
-import { IS_BLINK, fetchSpeech, speechRequest } from "@/lib/files";
+import { clipScript, fetchSpeech, speechRequest } from "@/lib/files";
 import { refreshEngineStatus } from "./EngineStatus";
-import { StreamPlayer } from "@/lib/streamPlayer";
-import { avatarBus } from "@/lib/avatar/bus";
+import { getClipTimeline, StreamPlayer } from "@/lib/streamPlayer";
+import { alignSpeech, sampleSpeech } from "@/lib/avatar/articulation";
+import { avatarBus, type SpeechCues } from "@/lib/avatar/bus";
 import { LiveTalk, report, settled } from "@/lib/avatar/liveTalk";
 import s from "./ui/Footer.module.css";
 
@@ -41,232 +42,188 @@ export default function PlayButton() {
   const [audioLoaded, setAudioLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
-  const audioRef = useRef<{ pause: () => void } | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  // Lets go of the avatar's tap on the clip that is playing.
-  const releaseVoice = useRef<(() => void) | null>(null);
-  const quietAvatar = () => {
-    releaseVoice.current?.();
-    releaseVoice.current = null;
-    avatarBus.setMood("idle");
-  };
-  const [amplitudeLevels, setAmplitudeLevels] = useState<number[]>(
-    new Array(5).fill(0)
-  );
-  const amplitudeIntervalRef = useRef<number | null>(null);
+  const active = useRef<(() => void) | null>(null);
+  const [amplitudeLevels, setAmplitudeLevels] = useState<number[]>(new Array(5).fill(0));
 
-  const stopSampling = () => {
-    if (amplitudeIntervalRef.current !== null) {
-      clearInterval(amplitudeIntervalRef.current);
-      amplitudeIntervalRef.current = null;
-    }
-  };
+  useEffect(() => () => {
+    active.current?.();
+    const context = audioContextRef.current;
+    audioContextRef.current = null;
+    context?.close().catch(() => {});
+  }, []);
 
   const handleSubmit = async () => {
-    if (audioLoading) return;
-
-    // toggle off if already playing
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-        audioRef.current = null;
-        setIsPlaying(false);
-        setAudioLoaded(false);
-        stopSampling();
-        quietAvatar();
-      }
+    if (active.current) {
+      active.current();
       return;
     }
 
+    const requestState = appStore.getState();
+    let face: LiveTalk | null = null;
+    let player: StreamPlayer | null = null;
+    let audio: HTMLAudioElement | null = null;
+    let source: AudioNode | null = null;
+    let releaseVoice: (() => void) | undefined;
+    let objectUrl: string | undefined;
+    let interval: number | undefined;
+    let tailTimer: number | undefined;
+    const abort = new AbortController();
+
+    const finish = () => {
+      if (active.current !== finish) return;
+      active.current = null;
+      abort.abort();
+      window.clearInterval(interval);
+      window.clearTimeout(tailTimer);
+      player?.stop();
+      if (audio) {
+        audio.onended = audio.onerror = audio.onplay = null;
+        audio.pause();
+      }
+      if (face) {
+        report(player ? "play" : "replay", face);
+        face.stop();
+      }
+      source?.disconnect();
+      releaseVoice?.();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      avatarBus.setMood(avatarBus.ear ? "listening" : "idle");
+      setIsPlaying(false);
+      setAudioLoaded(false);
+      setAudioLoading(false);
+    };
+    active.current = finish;
     setAudioLoading(true);
-    stopSampling();
-    // Until her voice starts, the avatar is thinking about what to say.
     avatarBus.setMood("thinking");
 
-    const onError = (err?: unknown) => {
-      if (err) console.error("Error playing speech:", err);
-      audioRef.current = null;
-      setAudioLoading(false);
-      setAudioLoaded(false);
-      setIsPlaying(false);
-      quietAvatar();
+    const failed = (err: unknown) => {
+      if (active.current !== finish) return;
+      finish();
+      console.error("Error playing speech:", err);
       refreshEngineStatus();
       alert("Error generating audio");
     };
-
+    const onEnded = () => {
+      if (face) {
+        const currentFace = face;
+        tailTimer = window.setTimeout(() => settled(currentFace).then(finish), currentFace.tail);
+      } else finish();
+    };
     const onPlay = () => {
+      if (active.current !== finish) return;
       avatarBus.setMood("idle");
       refreshEngineStatus();
-      amplitudeIntervalRef.current = window.setInterval(() => {
-        if (!analyserRef.current) {
-          // No level meter on this browser: just keep the bars moving.
-          setAmplitudeLevels(
-            Array.from({ length: 5 }, () => Math.random() * 0.06)
-          );
-          return;
-        }
-        const data = new Uint8Array(analyserRef.current.fftSize);
-        analyserRef.current.getByteTimeDomainData(data);
-        const avg =
-          data.reduce((sum, v) => sum + Math.abs(v - 128), 0) /
-          analyserRef.current.fftSize;
-        setAmplitudeLevels((prev) => [...prev.slice(1), avg / 128]);
-      }, 100);
       setIsPlaying(true);
       setAudioLoaded(true);
       setAudioLoading(false);
+      const analyser = avatarBus.voice;
+      if (!analyser) return;
+      const samples = new Uint8Array(analyser.fftSize);
+      interval = window.setInterval(() => {
+        analyser.getByteTimeDomainData(samples);
+        const level = samples.reduce((sum, v) => sum + Math.abs(v - 128), 0) / (128 * samples.length);
+        setAmplitudeLevels((prev) => [...prev.slice(1), level]);
+      }, 100);
     };
-
-    const onEnded = () => {
-      audioRef.current = null;
-      stopSampling();
-      setIsPlaying(false);
-      quietAvatar();
+    const cache = (clip: Blob) => {
+      const state = appStore.getState();
+      if (active.current === finish && state.input === requestState.input &&
+          state.voice === requestState.voice && state.prompt === requestState.prompt &&
+          state.urduMode === requestState.urduMode) {
+        appStore.setState({ latestAudio: clip });
+      }
     };
 
     try {
-      // A clip made earlier for the same script and settings is replayed.
-      const ready = appStore.getState().latestAudio;
-
-      // When she is on screen as photo-real video, her voice does not go
-      // straight to the speakers: it is played a moment late, in step with
-      // her lips, which the GPU box draws on her moving body (LiveTalk).
-      const stage = avatarBus.stage;
-      if (stage) {
-        if (!audioContextRef.current) {
-          audioContextRef.current = new AudioContext();
-        }
-        const ctx = audioContextRef.current;
-        await ctx.resume();
-        analyserRef.current = null;
-
-        // `voice` is the node her voice comes out of; `direct` connects it
-        // to the speakers if the video cannot be made after all.
-        const withFace = async (voice: AudioNode) => {
-          const face = new LiveTalk(stage, { context: ctx, node: voice }, () =>
-            voice.connect(ctx.destination)
-          );
-          await face.start();
-          return face;
-        };
-
-        if (!ready) {
-          const { init } = await speechRequest();
-          const player = new StreamPlayer(ctx, null);
-          const face = await withFace(player.analyser);
-          audioRef.current = {
-            pause: () => {
-              report("play-stopped", face);
-              player.stop();
-              face.stop();
-            },
-          };
-          player.onplay = onPlay;
-          player.onerror = (err) => {
-            face.stop();
-            onError(err);
-          };
-          // Her held-back voice is still playing out when the last of it
-          // has been handed over, and a gesture she is in the middle of is
-          // drawn to its end.
-          player.onended = () =>
-            window.setTimeout(async () => {
-              await settled(face);
-              if (audioRef.current) {
-                report("play", face);
-                face.stop();
-                onEnded();
-              }
-            }, face.tail);
-          player.onaudio = (wav) => appStore.setState({ latestAudio: wav });
-          player.start("/api/generate", init);
-          return;
-        }
-
-        const url = URL.createObjectURL(ready);
-        const audio = new Audio(url);
-        const face = await withFace(ctx.createMediaElementSource(audio));
-        let over = false;
-        const finish = () => {
-          if (over) return;
-          over = true;
-          URL.revokeObjectURL(url);
-          report("replay", face);
-          face.stop();
-          onEnded();
-        };
-        audioRef.current = {
-          pause: () => {
-            audio.pause();
-            finish();
-          },
-        };
-        audio.onplay = onPlay;
-        audio.onerror = () => {
-          face.stop();
-          onError();
-        };
-        audio.onended = () =>
-          window.setTimeout(() => settled(face).then(finish), face.tail);
-        await audio.play();
-        return;
-      }
-
-
-      if (IS_BLINK && !ready) {
-        // Play each chunk as it arrives, and keep the clip for the Voice
-        // file button.
-        if (!audioContextRef.current) {
-          audioContextRef.current = new AudioContext();
-        }
-        const ctx = audioContextRef.current;
-        await ctx.resume();
-        const { init } = await speechRequest();
-        const player = new StreamPlayer(ctx);
-        analyserRef.current = player.analyser;
-        releaseVoice.current = avatarBus.attachVoice(player.analyser);
-        audioRef.current = player;
-        player.onplay = onPlay;
-        player.onended = onEnded;
-        player.onerror = onError;
-        player.onaudio = (wav) => appStore.setState({ latestAudio: wav });
-        player.start("/api/generate", init);
-        return;
-      }
-
-      // Other browsers, and replays: the whole clip in an <audio> element.
-      let clip = ready;
-      if (!clip) {
-        clip = await fetchSpeech((await speechRequest()).init);
-        appStore.setState({ latestAudio: clip });
-      }
-      const url = URL.createObjectURL(clip);
-      const audio = new Audio(url);
-      analyserRef.current = null;
-      // The clip also passes through Web Audio, so the avatar's mouth can
-      // follow it. If that is not possible it simply plays as before.
+      let ctx = audioContextRef.current;
       try {
-        if (!audioContextRef.current) {
-          audioContextRef.current = new AudioContext();
-        }
-        const ctx = audioContextRef.current;
+        ctx ??= new AudioContext();
+        audioContextRef.current = ctx;
         await ctx.resume();
-        const source = ctx.createMediaElementSource(audio);
-        source.connect(ctx.destination);
-        releaseVoice.current = avatarBus.attachVoice(source);
-      } catch {}
-      audioRef.current = audio;
-      audio.onplay = onPlay;
-      audio.onerror = () => onError();
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        onEnded();
-      };
-      audio.onpause = onEnded;
-      await audio.play();
+      } catch {
+        ctx = null;
+      }
+      if (active.current !== finish) return;
+
+      let clip = requestState.latestAudio;
+      let init: RequestInit | undefined;
+      if (!clip) {
+        init = (await speechRequest()).init;
+        if (active.current !== finish) return;
+        if (!ctx) {
+          clip = await fetchSpeech({ ...init, signal: abort.signal });
+          if (active.current !== finish) return;
+          cache(clip);
+        }
+      }
+
+      let cues: SpeechCues | undefined;
+      if (clip) {
+        objectUrl = URL.createObjectURL(clip);
+        const element = new Audio(objectUrl);
+        audio = element;
+        audio.onplay = onPlay;
+        audio.onended = onEnded;
+        audio.onerror = () => failed(element.error);
+        if (ctx) {
+          const timeline = getClipTimeline(clip);
+          if (timeline) {
+            cues = {
+              sample: () => timeline.visemeAt(element.currentTime),
+              phrase: () => timeline.phraseAt(element.currentTime),
+            };
+          } else {
+            const text = clipScript(clip);
+            if (text) {
+              // Downloads made before the first Play have no sentence frames.
+              // Align the saved script against this recording once for playback.
+              try {
+                const decoded = await ctx.decodeAudioData(await clip.arrayBuffer());
+                const times = alignSpeech(text, decoded.getChannelData(0), decoded.sampleRate);
+                cues = {
+                  sample: () => sampleSpeech(times, element.currentTime),
+                  phrase: () => text,
+                };
+              } catch { /* The audio element may support more codecs than Web Audio. */ }
+            }
+          }
+          if (active.current !== finish) return;
+          try { source = ctx.createMediaElementSource(element); } catch {}
+        }
+      } else if (ctx) {
+        const stream = new StreamPlayer(ctx, null);
+        player = stream;
+        source = stream.analyser;
+        cues = { sample: () => stream.viseme, phrase: () => stream.phrase };
+        stream.onplay = onPlay;
+        stream.onended = onEnded;
+        stream.onerror = failed;
+        stream.onaudio = cache;
+      }
+
+      if (source && ctx) {
+        releaseVoice = avatarBus.attachVoice(source, cues);
+        const voice = source;
+        const output = ctx.destination;
+        const direct = () => {
+          if (active.current === finish) voice.connect(output);
+        };
+        const stage = avatarBus.stage;
+        if (stage) {
+          face = new LiveTalk(stage, { context: ctx, node: voice }, direct);
+          try { await face.start(); } catch {
+            face.stop();
+            face = null;
+            direct();
+          }
+        } else direct();
+      }
+      if (active.current !== finish) return;
+      if (audio) await audio.play();
+      else if (player && init) await player.start("/api/generate", init);
     } catch (err) {
-      onError(err);
+      failed(err);
     }
   };
 

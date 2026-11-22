@@ -86,6 +86,23 @@ const suits = (unit: Unit, want: Want) =>
 // Sitting quietly, whether idling or listening.
 const quiet = (unit: Unit) => inPool(unit, "idle") || inPool(unit, "listen");
 
+// Captions may contain Urdu script and English within the same sentence.
+// Only map a few unambiguous cues to the more conspicuous gesture clips.
+export function speechGesture(phrase: string): string {
+  const normalized = phrase.toLowerCase().normalize("NFKC")
+    .replace(/[\u0640\u064b-\u065f\u0670]/g, "")
+    .replace(/ي/g, "ی").replace(/ك/g, "ک");
+  const clauses = normalized.trim().split(/[.!؟?۔\n]+/).filter((part) => part.trim());
+  const clause = clauses[clauses.length - 1] ?? "";
+  const text = " " + clause.replace(/[^\p{L}\p{N}]+/gu, " ").trim() + " ";
+  if (/^ (?:salaa?m|assalaa?m|assalamualaikum|hello|hi|ال?سلام|سلام|وعلیکم) /.test(text)) return "greet";
+  if (/ (?:shukriya|shukria|شکریہ|thanks|thank you|sorry|معذرت|maazrat) /.test(text)) return "talk_chest";
+  if (/ (?:pehl[aiye]|pehle|پہلے|پہلی|پہلا|دوسرا|دوسری|firstly|secondly|step one) /.test(text)) return "talk_count";
+  if (/ (?:shayad|shaayad|شاید|پتا نہیں|پتہ نہیں|pata nahi|maybe|not sure) /.test(text)) return "talk_shrug";
+  if (/[؟?]\s*$/.test(normalized) || /^ (?:kya|kaise|kyun|کیا|کیسے|کیوں|how|why) /.test(text)) return "talk_lean";
+  return "";
+}
+
 export class Director {
   // What she is doing; the next unit is chosen to suit it. Set with turn().
   want: Want = "listen";
@@ -98,6 +115,7 @@ export class Director {
   private loaded: (Unit | null)[] = [null, null];
   private claimed = 0; // her lips have been asked for up to this moment
   private softNext = false; // the next unit planned follows a cut
+  private lastCue = "";
   private lately: string[] = []; // the units chosen most recently
 
   // players: two video elements, one on top of the other. One shows the
@@ -107,7 +125,8 @@ export class Director {
   constructor(
     private players: [HTMLVideoElement, HTMLVideoElement],
     private units: Unit[],
-    private show: (front: number, soft: boolean) => void
+    private show: (front: number, soft: boolean) => void,
+    private phrase: () => string = () => ""
   ) {}
 
   get running() {
@@ -132,6 +151,14 @@ export class Director {
     for (const player of this.players) player.pause();
   }
 
+  // Discard promises about frames for audio that the caller has interrupted.
+  cancelSpeech() {
+    this.claimed = 0;
+    this.greet = false;
+    this.turn("listen");
+    this.greet = false;
+  }
+
   // The unit and frame that will be on screen at time t, and how many
   // frames of that unit are left from there (that frame included).
   at(t: number): { unit: Unit; frame: number; left: number } {
@@ -139,7 +166,7 @@ export class Director {
     const slot = this.slotAt(t);
     const frame = Math.max(
       slot.from,
-      Math.min(slot.to - 1, slot.from + Math.round((t - slot.start) * FPS))
+      Math.min(slot.to - 1, slot.from + Math.floor((t - slot.start) * FPS + 1e-8))
     );
     return { unit: slot.unit, frame, left: slot.to - frame };
   }
@@ -154,6 +181,7 @@ export class Director {
   // be heard (when she begins to speak); a gesture then starts with it.
   turn(want: Want, by?: number) {
     this.want = want;
+    if (want !== "talk") this.lastCue = "";
     if (!this.running) return;
     const now = stageClock();
     // Nothing that is about to be shown, or that her lips are already
@@ -236,7 +264,7 @@ export class Director {
   // Decides units until the plan reaches time `until`.
   private plan(until: number) {
     let last = this.slots[this.slots.length - 1];
-    while (this.end(last) < until) {
+    while (this.end(last) <= until) {
       const unit = this.choose(last.unit);
       last = {
         unit,
@@ -254,11 +282,24 @@ export class Director {
   private choose(previous?: Unit): Unit {
     const ready = this.units.filter((unit) => unit.url);
     let pool: Pool = this.want;
-    if (this.greet && ready.some((unit) => unit.pool === "greet")) {
+    if (this.want === "talk" && this.greet && ready.some((unit) => unit.pool === "greet")) {
       this.greet = false;
       pool = "greet";
     }
     let choice = ready.filter((unit) => inPool(unit, pool));
+    if (pool === "talk") {
+      const cue = speechGesture(this.phrase());
+      // One expressive movement is enough for a phrase. While she continues
+      // explaining, open hands and small beats work without implying emotion.
+      const preferred = cue && cue !== this.lastCue ? ready.find((u) => u.name === cue) : undefined;
+      this.lastCue = cue;
+      if (preferred && preferred !== previous) {
+        choice = [preferred];
+      } else {
+        const neutral = choice.filter((u) => ["talk_open", "talk_right", "talk_both"].includes(u.name));
+        if (neutral.length) choice = neutral;
+      }
+    }
     if (!choice.length) choice = ready.filter((unit) => inPool(unit, "listen"));
     if (!choice.length) choice = ready;
     // Not a movement she has just made, when there are others.

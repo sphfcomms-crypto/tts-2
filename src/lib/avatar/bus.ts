@@ -5,6 +5,8 @@
 //   ear    the caller's microphone during a live call
 //   mood   what she is doing when she is not speaking
 
+import { LiveCues } from "./liveCues";
+import type { VisemeBlend } from "./articulation";
 import type { Director } from "./director";
 
 export type Mood = "idle" | "thinking" | "listening";
@@ -28,8 +30,17 @@ export type Direct = { url: string; token: string };
 
 type Tap = { analyser: AnalyserNode; release: () => void };
 
+export type SpeechCues = {
+  sample: (voice: AnalyserNode) => VisemeBlend | null;
+  phrase: () => string;
+};
+
+// A call can stay connected while a script plays. Each source owns its cues
+// and releasing a script restores the underlying call's analyser.
+const voices: (Tap & { cues?: SpeechCues })[] = [];
+const currentVoice = () => voices[voices.length - 1];
+
 const state = {
-  voice: null as Tap | null,
   ear: null as Tap | null,
   mood: "idle" as Mood,
   stage: null as Stage | null,
@@ -53,22 +64,54 @@ function tap(source: AudioNode): Tap {
   };
 }
 
-function put(slot: "voice" | "ear", source: AudioNode) {
-  state[slot]?.release();
+function attachEar(source: AudioNode) {
+  state.ear?.release();
   const mine = tap(source);
-  state[slot] = mine;
+  state.ear = mine;
   // Detaches this source, unless a newer one has taken its place.
   return () => {
     mine.release();
-    if (state[slot] === mine) state[slot] = null;
+    if (state.ear === mine) state.ear = null;
   };
 }
 
 export const avatarBus = {
   // Her voice: any Web Audio node the sound passes through.
-  attachVoice: (source: AudioNode) => put("voice", source),
+  attachVoice(source: AudioNode, cues?: SpeechCues) {
+    const mine = { ...tap(source), cues };
+    voices.push(mine);
+    return () => {
+      const index = voices.indexOf(mine);
+      if (index < 0) return;
+      voices.splice(index, 1);
+      mine.release();
+    };
+  },
+  startLiveSpeech() {
+    const live = new LiveCues();
+    let phrase = "";
+    let released = false;
+    const clear = () => {
+      phrase = "";
+      live.clear();
+    };
+    return {
+      update(text: string, span?: { startMs: number; endMs: number }) {
+        if (released) return;
+        phrase = text;
+        live.update(text, span);
+      },
+      clear,
+      sample: (voice: AnalyserNode) => released ? null : live.sample(voice),
+      phrase: () => phrase,
+      release() {
+        released = true;
+        clear();
+      },
+    };
+  },
   // The caller's microphone.
-  attachEar: (source: AudioNode) => put("ear", source),
+  attachEar,
   setMood: (mood: Mood) => {
     if (state.mood === mood) return;
     state.mood = mood;
@@ -94,7 +137,14 @@ export const avatarBus = {
     return state.direct;
   },
   get voice() {
-    return state.voice?.analyser ?? null;
+    return currentVoice()?.analyser ?? null;
+  },
+  get viseme() {
+    const source = currentVoice();
+    return source?.cues?.sample(source.analyser) ?? null;
+  },
+  get phrase() {
+    return currentVoice()?.cues?.phrase() ?? "";
   },
   get ear() {
     return state.ear?.analyser ?? null;

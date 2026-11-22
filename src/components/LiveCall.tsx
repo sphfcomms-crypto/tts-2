@@ -62,7 +62,7 @@ export function LiveCall() {
           {!showCaptions || (call.status === "idle" && !captions.her && !captions.you) ? (
             <span className="opacity-50">
               {call.status === "idle"
-                ? "Talk with her live, in the voice and vibe chosen in Settings. Your microphone is used only while the call is on."
+                ? "Talk with the AI voice companion in Urdu, Hinglish, or English. Your microphone is used only while the call is on."
                 : live
                 ? "On the call. Just talk."
                 : "Connecting…"}

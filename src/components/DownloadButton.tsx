@@ -27,7 +27,7 @@ export function SaveButtons() {
         clip = await fetchSpeech(init);
         appStore.setState({ latestAudio: clip });
       }
-      saveFile(clip, filename);
+      saveFile(clip, filename.replace(/\.(wav|mp3)$/, clip.type === "audio/wav" ? ".wav" : ".mp3"));
     } catch (err) {
       console.error("Could not save the voice file:", err);
       alert("Could not make the voice file.");

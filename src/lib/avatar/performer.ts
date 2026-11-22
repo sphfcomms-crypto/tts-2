@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { avatarBus } from "./bus";
-import { approach, LipSync } from "./lipsync";
+import { SpeechTurn } from "./face";
+import { approach } from "./lipsync";
 
 // Makes the loaded character behave like a person: she breathes, blinks,
 // shifts her weight, looks at you and away, listens, thinks, and when her
@@ -91,22 +91,27 @@ const ease = (x: number) => x * x * (3 - 2 * x);
 const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
 const between = (a: number, b: number) => a + Math.random() * (b - a);
 
-type Gesture = { side: -1 | 1 | 0; start: number; rise: number; hold: number; fall: number; size: number };
+type Gesture = {
+  side: -1 | 1 | 0;
+  start: number;
+  rise: number;
+  hold: number;
+  fall: number;
+  size: number;
+  releaseAt?: number;
+  releaseAmount?: number;
+};
 
 export class Performer {
   private joints = new Map<Role, Joint>();
   private morphs = new Map<string, { mesh: THREE.Mesh; index: number }[]>();
   private face: Record<string, number> = {};
   private mood: Record<string, number> = {};
-  private lips = new LipSync();
-  private ear = new Float32Array(512);
+  private speech = new SpeechTurn();
 
   private t = 0;
   private breath = 0;
-  private spokeAt = -10;
   private speakingFor = 0;
-  private average = 0;
-  private afterglow = 0;
 
   private blinkAt = 2;
   private blinkStart = -1;
@@ -123,7 +128,6 @@ export class Performer {
   private tiltAt = 0;
   private nod = -1;
   private nodAt = 0;
-  private heard = 0;
   private heardFor = 0;
 
   private gesture: Gesture | null = null;
@@ -172,17 +176,6 @@ export class Performer {
     this.face[name] = (this.face[name] ?? 0) + value;
   }
 
-  // Loudness of the caller's microphone, 0 to 1.
-  private listen(): number {
-    const ear = avatarBus.ear;
-    if (!ear) return 0;
-    if (this.ear.length !== ear.fftSize) this.ear = new Float32Array(ear.fftSize);
-    ear.getFloatTimeDomainData(this.ear);
-    let sum = 0;
-    for (let i = 0; i < this.ear.length; i++) sum += this.ear[i] ** 2;
-    return clamp(Math.sqrt(sum / this.ear.length) / 0.08, 0, 1);
-  }
-
   update(dt: number) {
     dt = Math.min(dt, 0.1);
     this.t += dt;
@@ -190,33 +183,21 @@ export class Performer {
     this.face = {};
 
     // ------------------------------------------------ what is she doing
-    const mouth = this.lips.update(avatarBus.voice, dt);
-    if (mouth.voiced) this.spokeAt = t;
-    const speaking = t - this.spokeAt < 0.4;
-    const wasSpeaking = this.speakingFor > 0;
+    const { mouth, doing, changed, stress, callerTalking, questioning, afterglow } = this.speech.update(dt);
+    const speaking = doing === "Responding";
+    const thinking = doing === "Thinking";
+    const listening = doing === "Listening";
     this.speakingFor = speaking ? this.speakingFor + dt : 0;
-    if (wasSpeaking && !speaking) this.afterglow = 1; // a small smile after a line
-    this.afterglow = approach(this.afterglow, 0, dt, 0.9);
-
-    const heard = this.listen();
-    this.heard = approach(this.heard, heard, dt, 0.15);
-    const callerTalking = this.heard > 0.18;
+    const phraseEnded = !callerTalking && this.heardFor > 0.3;
     this.heardFor = callerTalking ? this.heardFor + dt : 0;
-
-    let state: "speaking" | "thinking" | "listening" | "idle" = avatarBus.mood;
-    if (speaking) state = "speaking";
-    else if (callerTalking) state = "listening";
-
-    // Emphasis: how much louder this moment is than her running average.
-    this.average = approach(this.average, mouth.level, dt, 1.2);
-    const stress = speaking ? clamp((mouth.level - this.average) * 2.4, 0, 1) : 0;
+    if (changed) this.gazeAt = 0;
 
     // ------------------------------------------------------- breathing
-    const rate = state === "speaking" ? 0.3 : state === "thinking" ? 0.2 : 0.24;
+    const rate = speaking ? 0.3 : thinking ? 0.2 : 0.24;
     this.breath += dt * rate * Math.PI * 2;
     // In faster than out.
     const air = 0.5 - 0.5 * Math.cos(this.breath + 0.5 * Math.sin(this.breath));
-    const depth = state === "speaking" ? 0.7 : 1;
+    const depth = speaking ? 0.7 : 1;
     this.turn("spine1", -0.008 * air * depth);
     this.turn("chest", -0.018 * air * depth);
     this.turn("leftShoulder", 0, 0, 0.022 * air * depth);
@@ -239,18 +220,18 @@ export class Performer {
       this.tiltAt = t + between(2.5, 6);
       this.tilt = between(-1, 1);
     }
-    const thinking = state === "thinking";
     if (thinking && !this.wasThinking) this.awaySide = Math.random() < 0.5 ? -1 : 1;
     this.wasThinking = thinking;
 
     let yaw = 0.045 * wander(t * 0.5, 20);
     let pitch = 0.025 * wander(t * 0.6, 21);
     let roll = 0.02 * this.tilt + 0.01 * wander(t * 0.4, 22);
-    if (state === "speaking") {
+    if (speaking) {
       yaw += 0.06 * wander(t * 0.9, 23);
       pitch += 0.05 * stress + 0.02 * wander(t * 1.7, 24);
-      roll += 0.03 * this.tilt;
-    } else if (state === "listening") {
+      roll += 0.03 * this.tilt + (questioning ? 0.045 : 0);
+      if (questioning) pitch += 0.055;
+    } else if (listening) {
       pitch += 0.03;
       roll += 0.05 * Math.sign(this.tilt || 1);
     } else if (thinking) {
@@ -260,7 +241,7 @@ export class Performer {
     }
 
     // She nods when the caller finishes a phrase.
-    if (this.nod < 0 && !callerTalking && this.heard > 0.04 && t > this.nodAt && avatarBus.ear) {
+    if (this.nod < 0 && phraseEnded && listening && t > this.nodAt) {
       this.nod = 0;
       this.nodAt = t + between(2.2, 4.5);
     }
@@ -280,7 +261,7 @@ export class Performer {
 
     // ---------------------------------------------------------- eyes
     if (t > this.gazeAt) {
-      const away = thinking || (state !== "listening" && Math.random() < 0.18);
+      const away = thinking || (!listening && Math.random() < 0.18);
       if (thinking) {
         this.gazeTarget.set(this.awaySide * between(0.22, 0.34), -between(0.1, 0.22));
         this.gazeAt = t + between(0.7, 1.6);
@@ -335,7 +316,7 @@ export class Performer {
           this.blinkAt = t + 0.12; // now and then, twice
         } else {
           this.blinkAgain = false;
-          const mean = state === "speaking" ? 2.6 : state === "listening" ? 4.2 : 3.4;
+          const mean = speaking ? 2.6 : listening ? 4.2 : 3.4;
           this.blinkAt = t + clamp(-Math.log(1 - Math.random()) * mean, 1, 8);
         }
       }
@@ -346,7 +327,7 @@ export class Performer {
       mouthSmileLeft: 0.1,
       mouthSmileRight: 0.1,
     };
-    if (state === "listening") {
+    if (listening) {
       want.mouthSmileLeft = want.mouthSmileRight = 0.2;
       want.browInnerUp = 0.12;
       want.cheekSquintLeft = want.cheekSquintRight = 0.08;
@@ -358,13 +339,13 @@ export class Performer {
       want.browInnerUp = 0.2;
       want.browDownLeft = 0.14;
       want.eyeSquintLeft = want.eyeSquintRight = 0.18;
-    } else if (state === "speaking") {
-      want.mouthSmileLeft = want.mouthSmileRight = 0.12;
+    } else if (speaking) {
+      want.browInnerUp = questioning ? 0.18 : 0;
     }
     const names = new Set([...Object.keys(want), ...Object.keys(this.mood)]);
     for (const name of names) {
       this.mood[name] = approach(this.mood[name] ?? 0, want[name] ?? 0, dt, 0.28);
-      this.shape(name, this.mood[name]);
+      this.shape(name, speaking && name.startsWith("mouth") ? 0 : this.mood[name]);
     }
     // Brows lift on the words she stresses.
     this.shape("browInnerUp", 0.3 * stress);
@@ -372,12 +353,17 @@ export class Performer {
     this.shape("browOuterUpRight", 0.26 * stress);
     this.shape("eyeWideLeft", 0.1 * stress);
     this.shape("eyeWideRight", 0.1 * stress);
-    this.shape("mouthSmileLeft", 0.22 * this.afterglow);
-    this.shape("mouthSmileRight", 0.22 * this.afterglow);
-    this.shape("cheekSquintLeft", 0.12 * this.afterglow);
-    this.shape("cheekSquintRight", 0.12 * this.afterglow);
+    this.shape("mouthSmileLeft", 0.22 * afterglow);
+    this.shape("mouthSmileRight", 0.22 * afterglow);
+    this.shape("cheekSquintLeft", 0.12 * afterglow);
+    this.shape("cheekSquintRight", 0.12 * afterglow);
 
-    for (const [name, value] of Object.entries(mouth.shapes)) this.shape(name, value);
+    // The bundled rig has matching phoneme shapes on the lips, tongue and
+    // teeth. Applying both those and the ARKit jaw would open it twice.
+    const native = mouth.visemes;
+    const shapes = native && Object.keys(native).every((name) => this.morphs.has(name))
+      ? native : mouth.shapes;
+    for (const [name, value] of Object.entries(shapes)) this.shape(name, value);
     // Lids: a blink wins over everything else; they also lower with a smile.
     this.face.eyeBlinkLeft = Math.max(lid, this.face.eyeBlinkLeft ?? 0);
     this.face.eyeBlinkRight = Math.max(lid, this.face.eyeBlinkRight ?? 0);
@@ -399,13 +385,14 @@ export class Performer {
     if (this.gesture) {
       const g = this.gesture;
       const p = t - g.start;
-      // Speech stopping lets the hand drop early.
-      const hold = speaking ? g.hold : Math.min(g.hold, p - g.rise);
-      let amount: number;
-      if (p < g.rise) amount = ease(p / g.rise);
-      else if (p < g.rise + hold) amount = 1;
-      else amount = 1 - ease(Math.min(1, (p - g.rise - hold) / g.fall));
-      if (p >= g.rise + hold + g.fall) {
+      const rise = ease(Math.min(1, p / g.rise));
+      if (!speaking && g.releaseAt === undefined) {
+        g.releaseAt = Math.min(p, g.rise + g.hold);
+        g.releaseAmount = rise;
+      }
+      const falling = Math.max(0, p - (g.releaseAt ?? g.rise + g.hold));
+      const amount = (g.releaseAmount ?? rise) * (1 - ease(Math.min(1, falling / g.fall)));
+      if (falling >= g.fall) {
         this.gesture = null;
         this.gestureAt = t + between(1.6, 4.5);
       }
