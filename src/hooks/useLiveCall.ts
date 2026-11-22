@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CallTurns, transcriptSpan } from "@/lib/callTurns";
 import { avatarBus } from "@/lib/avatar/bus";
 import { canShowVideo, LiveTalk, report } from "@/lib/avatar/liveTalk";
 
@@ -29,6 +30,8 @@ export function useLiveCall({ onCaption, onError }: Options) {
   const sessionId = useRef("");
   const timers = useRef<number[]>([]);
   const active = useRef(false);
+  const generation = useRef(0);
+  const liveSpeech = useRef<ReturnType<typeof avatarBus.startLiveSpeech> | null>(null);
   // Web Audio taps for the avatar: her voice and the caller's microphone.
   const hearing = useRef<{ context: AudioContext; release: (() => void)[] } | null>(null);
   // Her on video during the call, when the photo-real avatar is on screen.
@@ -36,6 +39,9 @@ export function useLiveCall({ onCaption, onError }: Options) {
 
   const cleanup = useCallback(() => {
     active.current = false;
+    generation.current += 1;
+    liveSpeech.current?.release();
+    liveSpeech.current = null;
     timers.current.forEach((t) => window.clearInterval(t));
     timers.current = [];
     mic.current?.getTracks().forEach((track) => track.stop());
@@ -87,6 +93,8 @@ export function useLiveCall({ onCaption, onError }: Options) {
     async (voice: string, prompt: string, greet: boolean) => {
       if (active.current) return;
       active.current = true;
+      const callGeneration = ++generation.current;
+      const isCurrent = () => generation.current === callGeneration;
       setStatus("connecting");
       setSeconds(0);
 
@@ -98,11 +106,15 @@ export function useLiveCall({ onCaption, onError }: Options) {
             autoGainControl: true,
           },
         });
-        if (!active.current) {
+        if (!isCurrent()) {
           stream.getTracks().forEach((track) => track.stop());
           return;
         }
         mic.current = stream;
+        const speech = avatarBus.startLiveSpeech();
+        liveSpeech.current = speech;
+        const turns = new CallTurns(speech);
+        avatarBus.setMood("listening");
 
         // The avatar listens to the caller and moves her mouth with her
         // own voice. Nothing is played from here: these only measure.
@@ -112,7 +124,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
             context,
             release: [avatarBus.attachEar(context.createMediaStreamSource(stream))],
           };
-          avatarBus.setMood("listening");
+          void context.resume().catch(() => {});
         } catch {}
 
         const pc = new RTCPeerConnection();
@@ -124,18 +136,19 @@ export function useLiveCall({ onCaption, onError }: Options) {
         audio.autoplay = true;
         speaker.current = audio;
         pc.ontrack = (event) => {
-          audio.srcObject = event.streams[0];
+          if (!isCurrent()) return;
+          const remote = event.streams[0] ?? new MediaStream([event.track]);
+          audio.srcObject = remote;
           audio.play().catch(() => {});
 
-          // On video, her voice is heard from the video itself (it is in
-          // time with her lips there), so the direct sound is muted. If the
-          // video cannot be made, the direct sound comes back.
+          // LiveTalk plays a delayed copy of the same remote voice, aligned
+          // to the generated frames. Restore direct audio if video fails.
           const stage = avatarBus.stage;
           if (stage && canShowVideo() && !face.current) {
             audio.muted = true;
             const talk = new LiveTalk(
               stage,
-              { stream: event.streams[0] },
+              { stream: remote },
               () => {
                 audio.muted = false;
               },
@@ -155,7 +168,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
             try {
               ears.release.push(
                 avatarBus.attachVoice(
-                  ears.context.createMediaStreamSource(event.streams[0])
+                  ears.context.createMediaStreamSource(remote), speech
                 )
               );
             } catch {}
@@ -167,8 +180,35 @@ export function useLiveCall({ onCaption, onError }: Options) {
         const events = pc.createDataChannel("oai-events");
         channel.current = events;
         const said = { you: "", her: "" };
+        // Use mic activity alongside the session clock. A transcript can
+        // arrive after a reply, and a mic spike alone could just be noise.
+        const samples = new Float32Array(1024);
+        let lastMic = -Infinity;
+        let lastInput = -Infinity;
+        const listen = () => {
+          if (!isCurrent()) return;
+          const ear = avatarBus.ear;
+          const measuring = ear?.context.state === "running";
+          const now = performance.now();
+          if (measuring) {
+            ear.getFloatTimeDomainData(samples);
+            let power = 0;
+            for (const sample of samples) power += sample * sample;
+            if (power / samples.length > 0.018 ** 2) lastMic = now;
+          }
+          // Briefly hold a thinking pose in the gap before her answer.
+          const quiet = now - (measuring ? lastMic : lastInput) > 400;
+          const thinking = turns.waitingForReply && quiet && now - lastInput < 4000;
+          avatarBus.setMood(thinking ? "thinking" : "listening");
+        };
+        timers.current.push(window.setInterval(listen, 80));
+
         events.onmessage = ({ data }) => {
-          let event: { type?: string; delta?: string; error?: { message?: string } };
+          if (!isCurrent()) return;
+          let event: {
+            type?: string; delta?: string; start_ms?: number; end_ms?: number;
+            error?: { message?: string };
+          };
           try {
             event = JSON.parse(data);
           } catch {
@@ -176,12 +216,23 @@ export function useLiveCall({ onCaption, onError }: Options) {
           }
           if (event.type === "session.started") {
             setStatus("live");
-          } else if (event.type === "session.output_transcript.delta") {
-            said.her += event.delta ?? "";
+          } else if (event.type === "session.output_transcript.delta" && typeof event.delta === "string") {
+            said.her += event.delta;
             callbacks.current.onCaption("her", said.her);
-          } else if (event.type === "session.input_transcript.delta") {
-            said.you += event.delta ?? "";
+            if (turns.assistant(event.delta, transcriptSpan(event.start_ms, event.end_ms))) {
+              avatarBus.setMood("listening");
+            }
+          } else if (event.type === "session.input_transcript.delta" && typeof event.delta === "string") {
+            said.you += event.delta;
             callbacks.current.onCaption("you", said.you);
+            const now = performance.now();
+            const span = transcriptSpan(event.start_ms, event.end_ms);
+            const measuring = avatarBus.ear?.context.state === "running";
+            if (event.delta.trim() && turns.caller(span, measuring ? now - lastMic < 650 : !!span)) {
+              lastInput = now;
+              if (face.current?.hasSpeech) face.current.interrupt();
+              avatarBus.setMood("listening");
+            }
           } else if (event.type === "session.closed") {
             sessionId.current = "";
             cleanup();
@@ -191,6 +242,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
         };
 
         pc.onconnectionstatechange = () => {
+          if (!isCurrent()) return;
           if (pc.connectionState === "connected") {
             setStatus("live");
           } else if (
@@ -219,6 +271,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
           });
         });
 
+        if (!isCurrent()) return;
         const res = await fetch("/api/call", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -233,7 +286,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
           throw new Error((await res.text()) || "Could not start the call.");
         }
         const answer = await res.json();
-        if (!active.current) {
+        if (!isCurrent()) {
           // Cancelled while connecting: do not leave the session running.
           fetch(`/api/call?id=${encodeURIComponent(answer.sessionId)}`, {
             method: "DELETE",
@@ -242,6 +295,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
         }
         sessionId.current = answer.sessionId;
         await pc.setRemoteDescription({ type: "answer", sdp: answer.sdp });
+        if (!isCurrent()) return;
 
         // Clock, and the hard stop at the maximum call length.
         const began = Date.now();
@@ -254,6 +308,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
           }, 500)
         );
       } catch (err) {
+        if (!isCurrent()) return;
         const denied =
           err instanceof DOMException &&
           (err.name === "NotAllowedError" || err.name === "NotFoundError");
@@ -265,7 +320,6 @@ export function useLiveCall({ onCaption, onError }: Options) {
             : "Could not start the call."
         );
         stop();
-        cleanup();
       }
     },
     [cleanup, stop]

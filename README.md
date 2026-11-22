@@ -99,8 +99,9 @@ in the same seated pose, so any one can follow any other.
   on that device (pieces asked and joined, how late, the share of her
   speech that had lips) to `POST /api/avatar/report`, which writes one line
   to the server log.
-- Her gestures are not chosen from the meaning of her words: any gesture
-  goes with any sentence.
+- The director looks for a greeting, question, thanks or other familiar cue
+  in the current Urdu, Roman Urdu or English phrase and picks a matching
+  gesture when a suitable clip is loaded.
 - How well it works is measured, not judged by eye: `avatar-build/measure/`
   records the live page at real speed in a real browser (every picture and
   every sample of sound, on one clock) and compares her lips with her voice
@@ -116,10 +117,12 @@ like the photograph and not like a mesh). It is one 4 MB file,
 WebGL renderer (`src/components/HeadAvatar.tsx`): no server, no credits.
 
 - Her face is driven by `src/lib/avatar/face.ts`: fifty-two face shapes,
-  sixty times a second. Her mouth follows the sound of her voice (Play or a
-  live call), she blinks, her eyes move, her brows lift on stressed words,
-  and the renderer moves her head to suit what she is doing (listening,
-  thinking, speaking).
+  sixty times a second. During Play, each generated phrase arrives with its audio. The browser
+  estimates word and sound boundaries from pronunciation, pauses and changes
+  in the recording, and uses the playback clock to animate them. In a call
+  it uses transcript fragment timestamps when available and follows the
+  voice directly when text cues are missing. Her eyes, brows and head
+  respond to listening, thinking, questions and speech emphasis.
 - It is a head and neck only: no hands, no body language. Her skin is a
   little softer than the photograph, and her earrings smear when she turns.
 - It was built on the PC's own graphics card (`avatar-build/lam/`: how LAM
@@ -129,8 +132,8 @@ WebGL renderer (`src/components/HeadAvatar.tsx`): no server, no credits.
 **As a 3D character, when the head cannot be drawn.** `public/avatar/avatar.glb`
 was built in Blender (MakeHuman base fitted to the same face, photo skin,
 52 face shapes, skeleton, clothes) and is drawn by the browser with
-three.js. Her mouth follows the sound of the voice; she breathes, blinks,
-looks about, nods and gestures (`src/lib/avatar/`). It needs no server. It
+three.js. Its lip, jaw, teeth and tongue shapes follow the same speech cues
+as the photo-real head. She breathes, blinks, looks about, nods and gestures (`src/lib/avatar/`). It needs no server. It
 looks like a good 3D character, not like a person on video.
 
 The build scripts and references for both are in `avatar-build/`.

@@ -28,13 +28,13 @@ import { FPS, nudge, stageClock } from "./director";
 const TYPE = 'video/mp4; codecs="avc1.4d401f"';
 const CHUNK = 0.4; // seconds of voice per piece
 const LEAD = 0.2; // earlier sound sent along as context for the mouth
+const LOOKAHEAD = 0.1; // following speech in MuseTalk’s acoustic window, never rendered twice
 const PRE_ROLL = 0.1; // sound kept from just before she is heard to start
 const QUIET = 1.2; // silence that ends a line (shorter pauses are drawn)
 const LOUD = 0.006; // RMS above this is her voice
 const FIRST_DELAY = 1.5; // seconds her voice is held back, to begin with
 const MIN_DELAY = 0.9;
 const MAX_DELAY = 4;
-const SHORT = 3; // pieces of fewer frames than this are not made
 const DOWN = 3; // her voice is kept at a third of the device's rate (16 kHz)
 // Lips that move after the sound are noticed from about 45 ms; lips that
 // move before it are not noticed until about 125 ms. What is not known on
@@ -88,6 +88,13 @@ function join(a: Int16Array, b: Int16Array): Int16Array {
   out.set(a, 0);
   out.set(b, a.length);
   return out;
+}
+
+// Whisper uses 20 ms steps. Keeping context on that grid also gives exactly
+// the same number of samples in the browser and GPU at 16 or 14.7 kHz.
+function contextSamples(available: number, seconds: number, rate: number) {
+  const ms = 20 * Math.floor(Math.min(available / rate, seconds) * 50 + 1e-8);
+  return Math.round(ms * rate / 1000);
 }
 
 // One sample in the telephone's 8-bit coding (mu-law).
@@ -207,6 +214,10 @@ export class LiveTalk {
   private source: AudioNode | null = null;
   private delay: DelayNode | null = null;
   private gate: GainNode | null = null; // closes for the pause put into her voice
+  private lastVoiceAt = -Infinity; // end of the last voiced block on the capture clock
+  private interrupted = false; // waiting for the cut-off speaker's track to fall quiet
+  private speechRequests = new AbortController();
+  private generation = 0; // outstanding chunks belong to the turn that requested them
   private pausedUntil = 0; // audio-clock time at which that pause ends
   private lateRun = 0; // pieces in a row that came back too late
   private stretchedAt = -10; // audio-clock time of the last such pause
@@ -315,6 +326,45 @@ export class LiveTalk {
     return (this.hold + 0.5) * 1000;
   }
 
+  // Includes her delayed audio, even when no video chunk was ready.
+  get hasSpeech() {
+    return Boolean(this.context && this.context.currentTime < this.lastVoiceAt + this.hold);
+  }
+
+  interrupt() {
+    const context = this.context;
+    if (!context || !this.delay || !this.source || !this.gate || this.stopped || !this.hasSpeech) return;
+    // A DelayNode retains every sample already sent to it. Disconnect and
+    // replace it so an interrupted word cannot come out on the new turn.
+    const old = this.delay;
+    this.source.disconnect(old);
+    old.disconnect();
+    const delay = context.createDelay(MAX_DELAY + 1);
+    delay.delayTime.value = this.hold;
+    delay.connect(this.gate);
+    this.delay = delay;
+    this.nodes = this.nodes.map((node) => node === old ? delay : node);
+    this.interrupted = context.currentTime - this.lastVoiceAt < 0.16;
+    if (!this.interrupted) this.source.connect(delay);
+    this.lastVoiceAt = -Infinity;
+    this.gate.gain.cancelScheduledValues(context.currentTime);
+    this.gate.gain.value = 1;
+    this.pausedUntil = 0;
+    this.generation++;
+    this.speechRequests.abort();
+    this.speechRequests = new AbortController();
+    this.segments = [];
+    this.lateRun = 0;
+    this.recent = new Int16Array(0);
+    this.pending = new Int16Array(0);
+    this.talking = this.drawing = false;
+    this.quiet = 0;
+    this.stage.video.pause();
+    this.show(false);
+    this.stage.director.cancelSpeech();
+    this.stage.talking(false);
+  }
+
   // Still drawing, or still showing what was drawn.
   get busy() {
     return this.drawing || this.showing;
@@ -322,6 +372,7 @@ export class LiveTalk {
 
   stop() {
     this.stopped = true;
+    this.speechRequests.abort();
     window.clearInterval(this.clock);
     this.reel?.close();
     this.reel = null;
@@ -374,8 +425,12 @@ export class LiveTalk {
     };
   }
 
-  private async request(audio: Int16Array, leadSamples: number, clip: string, start: number) {
+  private async request(
+    audio: Int16Array, leadSamples: number, tailSamples: number, clip: string, start: number,
+    signal?: AbortSignal
+  ) {
     const leadMs = Math.round((leadSamples / this.rate) * 1000);
+    const tailMs = Math.round((tailSamples / this.rate) * 1000);
     // Straight to the GPU box when the browser can reach it: the way
     // through the app is slower. A body with no type keeps the browser
     // from asking the box for permission before every chunk.
@@ -383,19 +438,21 @@ export class LiveTalk {
     if (direct) {
       try {
         const res = await fetch(
-          `${direct.url}/speak?clip=${clip}&start=${start}&lead_ms=${leadMs}&audio=0&t=${direct.token}`,
-          { method: "POST", body: new Blob([new Uint8Array(wav(audio, this.rate))]) }
+          `${direct.url}/speak?clip=${clip}&start=${start}&lead_ms=${leadMs}&tail_ms=${tailMs}&audio=0&t=${direct.token}`,
+          { method: "POST", body: new Blob([new Uint8Array(wav(audio, this.rate))]), signal }
         );
         if (!res.ok) throw new Error(`video chunk failed (${res.status})`);
         return new Uint8Array(await res.arrayBuffer());
-      } catch {
+      } catch (err) {
+        if (signal?.aborted) throw err;
         this.directFailed = true;
       }
     }
-    const res = await fetch(`/api/avatar/chunk?clip=${clip}&start=${start}&lead=${leadMs}`, {
+    const res = await fetch(`/api/avatar/chunk?clip=${clip}&start=${start}&lead=${leadMs}&tail=${tailMs}`, {
       method: "POST",
       headers: { "Content-Type": "audio/wav" },
       body: new Uint8Array(wav(audio, this.rate)),
+      signal,
     });
     if (!res.ok) throw new Error(`video chunk failed (${res.status})`);
     return new Uint8Array(await res.arrayBuffer());
@@ -405,13 +462,14 @@ export class LiveTalk {
   // on the line as real pieces will: one alone comes back sooner than a
   // run of them does, and the delay set from it would be too short.
   private probe(more = 2) {
+    if (!this.stage.director.running) return this.fail();
     const began = performance.now();
-    const silence = new Int16Array(Math.round((CHUNK + LEAD) * this.rate));
+    const silence = new Int16Array(Math.round((CHUNK + LEAD + LOOKAHEAD) * this.rate));
     const spot = this.stage.director.at(stageClock());
-    this.request(silence, Math.round(LEAD * this.rate), spot.unit.name, 0)
+    this.request(silence, Math.round(LEAD * this.rate), Math.round(LOOKAHEAD * this.rate), spot.unit.name, 0)
       .then(() => {
         if (this.stopped || this.failed) return;
-        this.needed.push(CHUNK + (performance.now() - began) / 1000);
+        this.needed.push(CHUNK + LOOKAHEAD + (performance.now() - began) / 1000);
         this.adapt();
       })
       .catch(() => this.fail());
@@ -426,6 +484,9 @@ export class LiveTalk {
   private hear(block: Int16Array) {
     const context = this.context;
     if (this.stopped || this.failed || !context) return;
+    // Hiding the avatar or losing its GPU unmounts the stage during a call.
+    // Hand the voice back to direct playback before asking for another pose.
+    if (!this.stage.director.running) return this.fail();
 
     // A third of the rate is plenty for the mouth, and a third of the upload.
     const half = new Int16Array(Math.floor(block.length / DOWN));
@@ -441,6 +502,16 @@ export class LiveTalk {
     const at = this.heard;
     this.heard += half.length;
     const loud = Math.sqrt(sum / half.length) > LOUD;
+    if (this.interrupted) {
+      this.quiet = loud ? 0 : this.quiet + half.length;
+      if (this.quiet >= 0.16 * this.rate && this.delay) {
+        this.interrupted = false;
+        this.quiet = 0;
+        this.source?.connect(this.delay);
+      }
+      return;
+    }
+    if (loud) this.lastVoiceAt = this.firstAt + this.heard / this.rate;
     // When this block will be heard (and its picture seen), on the
     // director's clock.
     const lag = this.lag(context);
@@ -489,7 +560,7 @@ export class LiveTalk {
     }
 
     const size = Math.round(CHUNK * this.rate);
-    while (this.pending.length >= size) this.send(size);
+    while (this.pending.length >= size + Math.round(LOOKAHEAD * this.rate)) this.send(size);
     if (!active) {
       if (this.pending.length) this.send(this.pending.length);
       this.drawing = false;
@@ -506,7 +577,7 @@ export class LiveTalk {
     if (!reel || !context) return;
     const chunk = this.pending.slice(0, count);
     const lead = tail(this.recent, Math.round(LEAD * this.rate));
-    const sound = join(lead, chunk); // the chunk with the sound before it
+    const sound = join(lead, this.pending.subarray(0, count + Math.round(LOOKAHEAD * this.rate)));
     this.pending = this.pending.slice(count);
     this.recent = tail(join(this.recent, chunk), Math.round((LEAD + PRE_ROLL) * this.rate));
 
@@ -520,24 +591,21 @@ export class LiveTalk {
     let taken = 0; // samples of the chunk already given to a piece
 
     while (frames > 0) {
-      let spot = this.stage.director.at(seen);
-      if (spot.left < frames && spot.left < SHORT) {
-        // Hardly anything of this clip is left: begin on the next one.
-        seen += spot.left / FPS;
-        spot = this.stage.director.at(seen);
-      }
-      let take = Math.min(frames, spot.left);
-      // A remainder too short for a piece of its own stays with this one.
-      if (frames - take > 0 && frames - take < SHORT) take = frames;
+      const spot = this.stage.director.at(seen);
+      // Even a single frame belongs on its own body pose. Substituting the
+      // next clip early makes the face jump while the voice keeps playing.
+      const take = Math.min(frames, spot.left);
       const last = take === frames;
       const samples = last ? count - taken : Math.round((take / FPS) * this.rate);
       const from = lead.length + taken;
-      const context0 = Math.max(0, from - lead.length);
+      const before = contextSamples(from, LEAD, this.rate);
+      const after = contextSamples(sound.length - from - samples, LOOKAHEAD, this.rate);
       this.piece(
         reel,
         context,
-        sound.slice(context0, from + samples),
-        from - context0,
+        sound.subarray(from - before, from + samples + after),
+        before,
+        after,
         { audioStart: audioStart + taken / this.rate, length: samples / this.rate, mediaStart: -1, lag, hold: this.hold },
         spot.unit.name,
         spot.frame
@@ -555,16 +623,18 @@ export class LiveTalk {
     context: AudioContext,
     audio: Int16Array,
     leadSamples: number,
+    tailSamples: number,
     segment: Segment,
     clip: string,
     start: number
   ) {
     const lag = segment.lag;
+    const generation = this.generation;
     this.segments.push(segment);
     this.count.asked += 1;
     const asked = performance.now();
     let answered = asked;
-    const answer = this.request(audio, leadSamples, clip, start).then((video) => {
+    const answer = this.request(audio, leadSamples, tailSamples, clip, start, this.speechRequests.signal).then((video) => {
       answered = performance.now();
       return video;
     });
@@ -572,9 +642,14 @@ export class LiveTalk {
     // its turn in the order comes.
     answer.catch(() => {});
     this.order = this.order
-      .then(() => answer)
-      .then((video) => reel.append(video))
+      .then(async () => {
+        if (generation !== this.generation || this.stopped) return -1;
+        const video = await answer;
+        if (generation !== this.generation || this.stopped) return -1;
+        return reel.append(video);
+      })
       .then((mediaStart) => {
+        if (generation !== this.generation || this.stopped) return;
         segment.mediaStart = mediaStart;
         this.count.joined += 1;
         const took = context.currentTime - segment.audioStart;
@@ -597,13 +672,16 @@ export class LiveTalk {
         this.needed.push(context.currentTime - segment.audioStart);
         if (this.needed.length > 30) this.needed.shift();
       })
-      .catch(() => this.fail());
+      .catch(() => {
+        if (generation === this.generation) this.fail();
+      });
   }
 
   // Keeps the picture on the piece that belongs to the sound being heard.
   private tick() {
     const context = this.context;
     if (this.stopped || this.failed || !context) return;
+    if (!this.stage.director.running) return this.fail();
     const video = this.stage.video;
     const lag = this.lag(context);
     const now = context.currentTime - lag; // when what is heard now was spoken

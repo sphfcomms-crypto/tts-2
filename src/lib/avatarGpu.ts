@@ -122,15 +122,17 @@ export async function gpuSpeak(
   {
     clip = "talk",
     lead = 0,
+    tail = 0,
     sound = true,
     signal,
-  }: { clip?: string; lead?: number; sound?: boolean; signal?: AbortSignal } = {}
+  }: { clip?: string; lead?: number; tail?: number; sound?: boolean; signal?: AbortSignal } = {}
 ): Promise<{ video: Uint8Array; next: number }> {
   const base = gpuAddress();
   if (!base) throw new Error("the avatar GPU is not connected");
   const query =
     `clip=${clip}&start=${start}` +
     (lead ? `&lead_ms=${lead}` : "") +
+    (tail ? `&tail_ms=${tail}` : "") +
     (sound ? "" : "&audio=0");
   const res = await fetch(`${base}/speak?${query}`, {
     method: "POST",

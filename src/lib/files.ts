@@ -90,6 +90,11 @@ export async function speechRequest(): Promise<{
   };
 }
 
+// A clip made with the download button can be played later. Remember the
+// actual (possibly rewritten) script used to generate that exact Blob.
+const clipScripts = new WeakMap<Blob, string>();
+export const clipScript = (clip: Blob) => clipScripts.get(clip);
+
 // Fetches the whole clip (no playback) as a file ready to save or play.
 export async function fetchSpeech(init: RequestInit): Promise<Blob> {
   const res = await fetch("/api/generate", init);
@@ -98,9 +103,12 @@ export async function fetchSpeech(init: RequestInit): Promise<Blob> {
   }
   const bytes = new Uint8Array(await res.arrayBuffer());
   const wav = (res.headers.get("content-type") || "").includes("wav");
-  return new Blob([new Uint8Array(wav ? finishWav(bytes) : bytes)], {
+  const clip = new Blob([new Uint8Array(wav ? finishWav(bytes) : bytes)], {
     type: wav ? "audio/wav" : "audio/mpeg",
   });
+  const input = init.body instanceof FormData ? init.body.get("input") : null;
+  if (typeof input === "string") clipScripts.set(clip, input);
+  return clip;
 }
 
 export function saveFile(blob: Blob, filename: string) {

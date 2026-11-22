@@ -1,44 +1,74 @@
-// Plays a streamed WAV as it downloads. The browser's own <audio> element
-// waits until it has buffered a few seconds before it starts (measured:
-// 2.7 to 4.4 s here, with the first audio on the wire after 1.3 s); this
-// player schedules each chunk with Web Audio the moment it arrives. It also
-// keeps what it received, so the same audio can be saved as a file.
+import { alignSpeech, sampleSpeech, type TimedViseme, type VisemeBlend } from "./avatar/articulation";
+import { PIECE_MEDIA_TYPE, SpeechFrameReader } from "./speechFrames";
 
 const HEADER_BYTES = 44;
-const MIN_CHUNK_SECONDS = 0.08;
 const START_DELAY_SECONDS = 0.04;
 
-// A streamed WAV says its length is unknown. This writes the real length
-// into the header, so the file opens properly in other programs.
+function setWavLength(header: Uint8Array, dataBytes: number) {
+  const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+  view.setUint32(4, 36 + dataBytes, true);
+  view.setUint32(40, dataBytes, true);
+}
+
+// A streamed WAV says its length is unknown. Write the actual length once
+// it has arrived, so the file opens properly in other programs.
 export function finishWav(bytes: Uint8Array): Uint8Array {
   if (bytes.length < HEADER_BYTES) return bytes;
   const out = bytes.slice();
-  const view = new DataView(out.buffer);
-  view.setUint32(4, out.length - 8, true);
-  view.setUint32(40, out.length - HEADER_BYTES, true);
+  setWavLength(out, out.length - HEADER_BYTES);
   return out;
 }
+
+type Span = { start: number; end: number; text: string; cues: TimedViseme[] };
+
+class ClipTimeline {
+  private spans: Span[] = [];
+
+  add(span: Span) {
+    this.spans.push(span);
+  }
+
+  private at(time: number) {
+    let low = 0;
+    let high = this.spans.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      const span = this.spans[mid];
+      if (time < span.start) high = mid;
+      else if (time >= span.end) low = mid + 1;
+      else return span;
+    }
+  }
+
+  phraseAt(time: number) {
+    return this.at(time)?.text ?? "";
+  }
+
+  visemeAt(time: number): VisemeBlend | null {
+    const span = this.at(time);
+    return span ? sampleSpeech(span.cues, time - span.start) : null;
+  }
+}
+
+const clipTimelines = new WeakMap<Blob, ClipTimeline>();
+export const getClipTimeline = (clip: Blob) => clipTimelines.get(clip);
 
 export class StreamPlayer {
   onplay?: () => void;
   onended?: () => void;
   onerror?: (err: unknown) => void;
-  // The whole clip, once it has fully arrived.
   onaudio?: (wav: Blob) => void;
-
-  // Everything that is played passes through this node, for level meters.
   readonly analyser: AnalyserNode;
 
   private abort = new AbortController();
   private sources = new Set<AudioBufferSourceNode>();
   private nextTime = 0;
-  private started = false;
   private downloaded = false;
   private stopped = false;
+  // Network stalls add silence to the live clock. The saved WAV contains
+  // only the audio and the explicitly inserted pauses.
+  private playback = new ClipTimeline();
 
-  // output: where the sound goes. Normally the speakers. With null it goes
-  // nowhere by itself: the caller takes it from `analyser` (the video
-  // avatar plays it a moment late, in step with her lips).
   constructor(
     private context: AudioContext,
     output: AudioNode | null = context.destination
@@ -48,57 +78,52 @@ export class StreamPlayer {
     if (output) this.analyser.connect(output);
   }
 
+  get viseme() {
+    return this.stopped ? null : this.playback.visemeAt(this.context.currentTime);
+  }
+
+  get phrase() {
+    return this.stopped ? "" : this.playback.phraseAt(this.context.currentTime);
+  }
+
   async start(url: string, init: RequestInit = {}) {
     try {
-      const res = await fetch(url, { ...init, signal: this.abort.signal });
+      const headers = new Headers(init.headers);
+      headers.set("Accept", PIECE_MEDIA_TYPE);
+      const res = await fetch(url, { ...init, headers, signal: this.abort.signal });
       if (!res.ok || !res.body) {
-        throw new Error(
-          (await res.text().catch(() => "")) ||
-            `audio request failed (${res.status})`
-        );
+        throw new Error((await res.text().catch(() => "")) || `audio request failed (${res.status})`);
+      }
+      if (res.headers.get("content-type")?.split(";")[0] !== PIECE_MEDIA_TYPE) {
+        throw new Error("The server did not return a framed speech stream.");
       }
 
-      const reader = res.body.getReader();
-      const received: Uint8Array[] = [];
-      let header: Uint8Array = new Uint8Array(0);
-      let sampleRate = 24000;
-      let pending: Uint8Array = new Uint8Array(0); // PCM not yet scheduled
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        received.push(value);
-        let chunk = value;
-
-        if (header.length < HEADER_BYTES) {
-          const need = HEADER_BYTES - header.length;
-          header = concat(header, chunk.subarray(0, need));
-          chunk = chunk.subarray(need);
-          if (header.length < HEADER_BYTES) continue;
-          sampleRate = new DataView(
-            header.buffer,
-            header.byteOffset,
-            header.byteLength
-          ).getUint32(24, true);
+      const reader = new SpeechFrameReader(res.body.getReader());
+      const wav = await reader.bytes(HEADER_BYTES);
+      const sampleRate = new DataView(wav.buffer).getUint32(24, true);
+      if (sampleRate !== 24000) throw new Error("Invalid speech sample rate.");
+      const chunks: BlobPart[] = [wav];
+      const replay = new ClipTimeline();
+      let dataBytes = 0;
+      for (let frame = await reader.next(); frame; frame = await reader.next()) {
+        if (this.stopped) return;
+        const { text, pcm, gapSamples } = frame;
+        const fileTime = dataBytes / (2 * sampleRate);
+        const span = this.schedule(text, pcm, gapSamples, sampleRate);
+        if (span) {
+          replay.add({ ...span, start: fileTime, end: fileTime + pcm.length / (2 * sampleRate) });
         }
-
-        pending = concat(pending, chunk);
-        const minBytes = Math.floor(sampleRate * MIN_CHUNK_SECONDS) * 2;
-        if (pending.length >= minBytes) {
-          const usable = pending.length & ~1; // whole 16-bit samples only
-          this.schedule(pending.subarray(0, usable), sampleRate);
-          pending = pending.slice(usable);
-        }
+        chunks.push(pcm);
+        if (gapSamples) chunks.push(new Uint8Array(gapSamples * 2));
+        dataBytes += pcm.length + gapSamples * 2;
       }
-
-      if (pending.length >= 2) {
-        this.schedule(pending.subarray(0, pending.length & ~1), sampleRate);
-      }
+      if (this.stopped) return;
+      if (!this.nextTime) throw new Error("The audio stream was empty.");
+      setWavLength(wav, dataBytes);
+      const clip = new Blob(chunks, { type: "audio/wav" });
+      clipTimelines.set(clip, replay);
       this.downloaded = true;
-      if (!this.started) throw new Error("the audio stream was empty");
-
-      const whole = finishWav(received.reduce(concat, new Uint8Array(0)));
-      this.onaudio?.(new Blob([new Uint8Array(whole)], { type: "audio/wav" }));
+      this.onaudio?.(clip);
       this.finishIfIdle();
     } catch (err) {
       if (this.stopped) return;
@@ -107,7 +132,6 @@ export class StreamPlayer {
     }
   }
 
-  // Stops playback and the download. onended is not called.
   stop() {
     if (this.stopped) return;
     this.stopped = true;
@@ -121,43 +145,35 @@ export class StreamPlayer {
     this.analyser.disconnect();
   }
 
-  // The same call an <audio> element takes, so callers can treat both alike.
   pause() {
     this.stop();
   }
 
-  private schedule(pcm: Uint8Array, sampleRate: number) {
-    if (this.stopped || pcm.length < 2) return;
-
+  private schedule(text: string, pcm: Uint8Array, gapSamples: number, sampleRate: number) {
     const samples = pcm.length / 2;
-    const buffer = this.context.createBuffer(1, samples, sampleRate);
-    const channel = buffer.getChannelData(0);
+    if (!samples && !gapSamples) return;
+    const buffer = this.context.createBuffer(1, samples + gapSamples, sampleRate);
+    const speech = buffer.getChannelData(0).subarray(0, samples);
     const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-    for (let i = 0; i < samples; i++) {
-      channel[i] = view.getInt16(i * 2, true) / 32768;
-    }
+    for (let i = 0; i < samples; i++) speech[i] = view.getInt16(i * 2, true) / 32768;
+    const cues = alignSpeech(text, speech, sampleRate);
+    const first = !this.nextTime;
+    const start = Math.max(this.context.currentTime + START_DELAY_SECONDS, this.nextTime);
+    const span = { start, end: start + samples / sampleRate, text, cues };
+    this.playback.add(span);
 
     const source = this.context.createBufferSource();
     source.buffer = buffer;
     source.connect(this.analyser);
-
-    // Chunks play back to back. If the download fell behind, playback
-    // simply resumes with the next chunk instead of overlapping.
-    const now = this.context.currentTime + START_DELAY_SECONDS;
-    const at = Math.max(now, this.nextTime);
-    source.start(at);
-    this.nextTime = at + buffer.duration;
-
+    source.start(start);
+    this.nextTime = start + buffer.duration;
     this.sources.add(source);
     source.onended = () => {
       this.sources.delete(source);
       this.finishIfIdle();
     };
-
-    if (!this.started) {
-      this.started = true;
-      this.onplay?.();
-    }
+    if (first) this.onplay?.();
+    return span;
   }
 
   private finishIfIdle() {
@@ -166,13 +182,4 @@ export class StreamPlayer {
     this.analyser.disconnect();
     this.onended?.();
   }
-}
-
-function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
-  if (!a.length) return b;
-  if (!b.length) return a;
-  const out = new Uint8Array(a.length + b.length);
-  out.set(a, 0);
-  out.set(b, a.length);
-  return out;
 }

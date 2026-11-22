@@ -29,7 +29,7 @@ const FACE = "radial-gradient(ellipse 10.4% 13.9% at 50.2% 30.8%, #000 70%, tran
 
 // Before the body-language clips existed there was one long listening
 // loop. It still serves when they are missing or not prepared on the box.
-const ONE_LOOP: Unit[] = [
+const oneLoop = (): Unit[] => [
   { name: "talk", frames: 720, pool: "listen", file: `${FILES}/listen.mp4` },
 ];
 
@@ -50,14 +50,14 @@ type Listing = {
 async function listUnits(clips: string[]): Promise<Unit[]> {
   try {
     const res = await fetch(`${FILES}/units.json`);
-    if (!res.ok) return ONE_LOOP;
+    if (!res.ok) return oneLoop();
     const listing = (await res.json()) as Listing;
     const units = (listing.units ?? [])
       .filter((unit) => clips.includes(unit.name) && unit.frames > 0)
       .map((unit) => ({ ...unit, file: `${FILES}/units/${unit.name}.mp4` }));
-    return units.some((unit) => unit.pool === "listen") ? units : ONE_LOOP;
+    return units.some((unit) => unit.pool === "listen") ? units : oneLoop();
   } catch {
-    return ONE_LOOP;
+    return oneLoop();
   }
 }
 
@@ -111,7 +111,7 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
 
     listUnits(prepared.split(",")).then(async (units) => {
       if (gone) return;
-      made = new Director(players, units, show);
+      made = new Director(players, units, show, () => avatarBus.phrase);
       // What she is doing at this moment (the effect below only hears of changes).
       made.want =
         avatarBus.mood === "thinking" ? "think" : avatarBus.mood === "listening" ? "listen" : "idle";
@@ -133,7 +133,9 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
       const worker = async () => {
         for (let unit = queue.shift(); unit && !gone; unit = queue.shift()) {
           try {
-            const url = URL.createObjectURL(await fetchClip(unit));
+            const blob = await fetchClip(unit);
+            if (gone) return;
+            const url = URL.createObjectURL(blob);
             urls.push(url);
             unit.url = url;
             begin();
@@ -161,9 +163,9 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
   // made, otherwise listening. (That she has begun to speak, the lip sync
   // tells the director itself, with the moment her voice will be heard.)
   useEffect(() => {
-    director.current?.turn(
-      talking ? "talk" : mood === "thinking" ? "think" : mood === "listening" ? "listen" : "idle"
-    );
+    const want = talking ? "talk" : mood === "thinking" ? "think" : mood === "listening" ? "listen" : "idle";
+    // LiveTalk already planned the speech onset at an audio-clock deadline.
+    if (director.current && director.current.want !== want) director.current.turn(want);
   }, [talking, mood]);
 
   const layer = "absolute inset-0 w-full h-full object-cover";

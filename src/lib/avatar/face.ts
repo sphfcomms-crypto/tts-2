@@ -1,4 +1,5 @@
 import { avatarBus } from "./bus";
+import { speechGesture } from "./director";
 import { approach, LipSync } from "./lipsync";
 
 // Her face, as fifty-two numbers (the ARKit face shapes), sixty times a
@@ -30,19 +31,67 @@ const between = (a: number, b: number) => a + Math.random() * (b - a);
 const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
 const ease = (x: number) => x * x * (3 - 2 * x);
 
+// Both local renderers use the outgoing audio and microphone on the same
+// frame. A short release holds the speaking pose between syllables. A caller
+// taking the floor during a pause, or a detached output, ends it immediately.
+export class SpeechTurn {
+  private lips = new LipSync();
+  private ear = new Float32Array(512);
+  private heard = 0;
+  private release = 0;
+  private average = 0;
+  private afterglow = 0;
+  private doing: Doing = "Idle";
+  private phrase = "";
+  private gesture = "";
+
+  private micLevel(): number {
+    const ear = avatarBus.ear;
+    if (!ear) return 0;
+    if (this.ear.length !== ear.fftSize) this.ear = new Float32Array(ear.fftSize);
+    ear.getFloatTimeDomainData(this.ear);
+    let sum = 0;
+    for (const sample of this.ear) sum += sample * sample;
+    return clamp(Math.sqrt(sum / this.ear.length) / 0.08, 0, 1);
+  }
+
+  update(dt: number) {
+    const voice = avatarBus.voice;
+    const mouth = this.lips.update(voice, dt, avatarBus.viseme);
+    const mic = this.micLevel();
+    this.heard = approach(this.heard, mic, dt, mic > this.heard ? 0.04 : 0.15);
+    const callerTalking = Boolean(avatarBus.ear) && this.heard > 0.18;
+    this.release = mouth.voiced ? 0.22 : Math.max(0, this.release - dt);
+    if (!voice || (callerTalking && !mouth.voiced)) this.release = 0;
+
+    let doing: Doing = "Idle";
+    if (this.release > 0) doing = "Responding";
+    else if (callerTalking || avatarBus.mood === "listening") doing = "Listening";
+    else if (avatarBus.mood === "thinking") doing = "Thinking";
+    const phrase = doing === "Responding" ? avatarBus.phrase : "";
+    if (phrase !== this.phrase) {
+      this.phrase = phrase;
+      this.gesture = phrase ? speechGesture(phrase) : "";
+    }
+    const questioning = this.gesture === "talk_lean";
+    const changed = this.doing !== doing;
+    if (this.doing === "Responding" && changed && !callerTalking) this.afterglow = 1;
+    if (doing === "Responding") this.afterglow = 0;
+    this.doing = doing;
+    this.afterglow = approach(this.afterglow, 0, dt, 0.9);
+    this.average = approach(this.average, mouth.level, dt, 1.2);
+    const stress = mouth.voiced ? clamp((mouth.level - this.average) * 2.4, 0, 1) : 0;
+    return { mouth, doing, changed, callerTalking, stress, questioning, afterglow: this.afterglow };
+  }
+}
+
 export class Face {
   // What she is doing now; the renderer moves her head to suit it.
   doing: Doing = "Idle";
 
-  private lips = new LipSync();
-  private ear = new Float32Array(512);
+  private turn = new SpeechTurn();
   private mood: Record<string, number> = {};
   private t = 0;
-  private spokeAt = -10;
-  private wasSpeaking = false;
-  private average = 0;
-  private afterglow = 0;
-  private heard = 0;
 
   private blinkAt = 2;
   private blinkStart = -1;
@@ -56,17 +105,6 @@ export class Face {
   private awaySide = 1;
   private wasThinking = false;
 
-  // Loudness of the caller's microphone, 0 to 1.
-  private listen(): number {
-    const ear = avatarBus.ear;
-    if (!ear) return 0;
-    if (this.ear.length !== ear.fftSize) this.ear = new Float32Array(ear.fftSize);
-    ear.getFloatTimeDomainData(this.ear);
-    let sum = 0;
-    for (let i = 0; i < this.ear.length; i++) sum += this.ear[i] ** 2;
-    return clamp(Math.sqrt(sum / this.ear.length) / 0.08, 0, 1);
-  }
-
   // dt: seconds since the last call. Returns the weight of each shape.
   update(dt: number): Record<string, number> {
     dt = Math.min(dt, 0.1);
@@ -79,27 +117,11 @@ export class Face {
     };
 
     // ------------------------------------------------ what is she doing
-    const mouth = this.lips.update(avatarBus.voice, dt);
-    if (mouth.voiced) this.spokeAt = t;
-    const speaking = t - this.spokeAt < 0.4;
-    if (this.wasSpeaking && !speaking) this.afterglow = 1; // a small smile after a line
-    this.wasSpeaking = speaking;
-    this.afterglow = approach(this.afterglow, 0, dt, 0.9);
-
-    this.heard = approach(this.heard, this.listen(), dt, 0.15);
-    const callerTalking = this.heard > 0.18;
-    const thinking = !speaking && !callerTalking && avatarBus.mood === "thinking";
-    this.doing = speaking
-      ? "Responding"
-      : callerTalking || avatarBus.mood === "listening"
-        ? "Listening"
-        : thinking
-          ? "Thinking"
-          : "Idle";
-
-    // Emphasis: how much louder this moment is than her running average.
-    this.average = approach(this.average, mouth.level, dt, 1.2);
-    const stress = speaking ? clamp((mouth.level - this.average) * 2.4, 0, 1) : 0;
+    const { mouth, doing, changed, stress, questioning, afterglow } = this.turn.update(dt);
+    this.doing = doing;
+    const thinking = doing === "Thinking";
+    const speaking = doing === "Responding";
+    if (changed) this.gazeAt = 0;
 
     // ---------------------------------------------------------- eyes
     if (thinking && !this.wasThinking) this.awaySide = Math.random() < 0.5 ? -1 : 1;
@@ -173,11 +195,12 @@ export class Face {
       want.browDownLeft = 0.14;
       want.eyeSquintLeft = want.eyeSquintRight = 0.18;
     } else if (speaking) {
-      want.mouthSmileLeft = want.mouthSmileRight = 0.12;
+      want.browInnerUp = questioning ? 0.18 : 0;
     }
     for (const name of new Set([...Object.keys(want), ...Object.keys(this.mood)])) {
       this.mood[name] = approach(this.mood[name] ?? 0, want[name] ?? 0, dt, 0.28);
-      add(name, this.mood[name]);
+      // A smile or pressed thinking pose must yield to the spoken mouth shape.
+      add(name, speaking && name.startsWith("mouth") ? 0 : this.mood[name]);
     }
     // Brows lift on the words she stresses.
     add("browInnerUp", 0.3 * stress);
@@ -185,10 +208,10 @@ export class Face {
     add("browOuterUpRight", 0.26 * stress);
     add("eyeWideLeft", 0.1 * stress);
     add("eyeWideRight", 0.1 * stress);
-    add("mouthSmileLeft", 0.22 * this.afterglow);
-    add("mouthSmileRight", 0.22 * this.afterglow);
-    add("cheekSquintLeft", 0.12 * this.afterglow);
-    add("cheekSquintRight", 0.12 * this.afterglow);
+    add("mouthSmileLeft", 0.22 * afterglow);
+    add("mouthSmileRight", 0.22 * afterglow);
+    add("cheekSquintLeft", 0.12 * afterglow);
+    add("cheekSquintRight", 0.12 * afterglow);
 
     for (const [name, value] of Object.entries(mouth.shapes)) add(name, value);
     // A blink wins over everything else the lids are doing.

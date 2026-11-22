@@ -1,11 +1,12 @@
 import { NextRequest, userAgent } from "next/server";
-import { silence, trimSilence, wavHeader } from "@/lib/router/pcm";
+import { PCM_RATE, silence, trimSilence, wavHeader } from "@/lib/router/pcm";
 import {
   PARAGRAPH_GAP_MS,
   SENTENCE_GAP_MS,
   makeSpeech,
   readSpeechRequest,
 } from "@/lib/speechPieces";
+import { frameHeader, PIECE_MEDIA_TYPE } from "@/lib/speechFrames";
 import { overLimit } from "@/lib/usage";
 
 // Generates the speech and streams it back. The script is spoken in pieces
@@ -17,7 +18,8 @@ async function speak(
   params: { input: string; prompt: string; voice: string; vibe: string }
 ) {
   const ua = userAgent(req);
-  const format = ua.engine?.name === "Blink" ? "wav" : "mp3";
+  const framed = req.headers.get("accept") === PIECE_MEDIA_TYPE;
+  const format = framed || ua.engine?.name === "Blink" ? "wav" : "mp3";
 
   const { voice, vibe } = params;
   const ready = readSpeechRequest(params);
@@ -49,22 +51,34 @@ async function speak(
 
         for (let i = 0; i < pieces.length; i++) {
           const piece = await speech.piece(i);
-          if (!piece.ok || req.signal.aborted) break;
+          if (!piece.ok || req.signal.aborted) {
+            if (framed) throw new Error("A speech phrase could not be completed.");
+            break;
+          }
 
           if (format === "wav") {
-            controller.enqueue(trimSilence(piece.audio));
-            if (i < pieces.length - 1) {
-              controller.enqueue(
-                silence(
-                  pieces[i].paragraphEnd ? PARAGRAPH_GAP_MS : SENTENCE_GAP_MS
-                )
-              );
+            const pcm = trimSilence(piece.audio);
+            const pauseMs = pieces[i].paragraphEnd ? PARAGRAPH_GAP_MS : SENTENCE_GAP_MS;
+            const gap = i === pieces.length - 1 ? 0 : pauseMs;
+            if (framed) {
+              const phrase = pieces[i].text;
+              if (!pcm.length && /[\p{L}\p{N}]/u.test(phrase)) {
+                throw new Error("A speech phrase contained no audible samples.");
+              }
+              const text = new TextEncoder().encode(phrase);
+              const gapSamples = Math.round(gap * PCM_RATE / 1000);
+              controller.enqueue(frameHeader(text.length, pcm.length, gapSamples));
+              controller.enqueue(text);
             }
+            if (pcm.length) controller.enqueue(pcm);
+            if (!framed && gap) controller.enqueue(silence(gap));
           } else {
             controller.enqueue(piece.audio);
           }
         }
+        if (framed) controller.enqueue(frameHeader(0, 0, 0));
       } catch (err) {
+        if (framed) controller.error(err);
         if (!(err instanceof TypeError)) {
           console.error("Speech stream stopped:", err);
         }
@@ -80,8 +94,9 @@ async function speak(
 
   return new Response(body, {
     headers: {
-      "Content-Type": format === "wav" ? "audio/wav" : "audio/mpeg",
-      "Content-Disposition": `inline; filename="${filename}"`,
+      "Content-Type": framed ? PIECE_MEDIA_TYPE : format === "wav" ? "audio/wav" : "audio/mpeg",
+      ...(!framed && { "Content-Disposition": `inline; filename="${filename}"` }),
+      "Vary": "Accept, User-Agent",
       // no-transform keeps the server from gzipping the stream, which held
       // the first audio back until several seconds of it had piled up.
       "Cache-Control": "no-cache, no-transform",
