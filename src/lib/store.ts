@@ -27,6 +27,9 @@ export interface Toggles {
 
 export interface AppState extends Toggles {
   voice: string;
+  // Latched for this call when the GPU video cannot follow the remote voice.
+  localCallAvatar: boolean;
+  localScriptAvatar: boolean;
   // The script to speak, and whether it differs from the opening sample.
   input: string;
   inputDirty: boolean;
@@ -81,6 +84,8 @@ function saved(): Partial<AppState> {
 
 const INITIAL_STATE: AppState = {
   voice: DEFAULT_VOICE,
+  localCallAvatar: false,
+  localScriptAvatar: false,
   input: DEFAULT_SCRIPT,
   inputDirty: false,
   prompt: DEFAULT_VIBE.prompt,

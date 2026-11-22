@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CallTurns, transcriptSpan } from "@/lib/callTurns";
+import { appStore } from "@/lib/store";
 import { avatarBus } from "@/lib/avatar/bus";
 import { canShowVideo, LiveTalk, report } from "@/lib/avatar/liveTalk";
 
@@ -67,6 +68,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
       hearing.current.context.close().catch(() => {});
       hearing.current = null;
     }
+    appStore.setState({ localCallAvatar: false });
     avatarBus.setMood("idle");
     setStatus("idle");
   }, []);
@@ -135,33 +137,41 @@ export function useLiveCall({ onCaption, onError }: Options) {
         const audio = new Audio();
         audio.autoplay = true;
         speaker.current = audio;
+        let callVoice: AnalyserNode | null = null;
         pc.ontrack = (event) => {
           if (!isCurrent()) return;
           const remote = event.streams[0] ?? new MediaStream([event.track]);
           audio.srcObject = remote;
-          audio.play().catch(() => {});
 
           // LiveTalk plays a delayed copy of the same remote voice, aligned
           // to the generated frames. Restore direct audio if video fails.
           const stage = avatarBus.stage;
-          if (stage && canShowVideo() && !face.current) {
+          const switchToLocalAvatar = () => {
+            if (!isCurrent()) return;
+            // Stop the delayed speaker and all pending video before exposing
+            // the remote track. Keep WebRTC, the mic, and its captions live.
+            if (face.current) {
+              report("call-local", face.current);
+              face.current.stop();
+              face.current = null;
+            }
+            audio.muted = false;
+            appStore.setState({ localCallAvatar: true });
+          };
+          if (stage && canShowVideo() && !face.current && !appStore.getState().localCallAvatar) {
             audio.muted = true;
-            const talk = new LiveTalk(
-              stage,
-              { stream: remote },
-              () => {
-                audio.muted = false;
-              },
-              greet
-            );
+            const talk = new LiveTalk(stage, { stream: remote }, switchToLocalAvatar, greet);
             face.current = talk;
             if (process.env.NODE_ENV !== "production") {
               Object.assign(window, { __liveTalk: talk });
             }
             talk.start().catch(() => {
-              audio.muted = false;
+              if (face.current === talk) switchToLocalAvatar();
             });
+          } else {
+            switchToLocalAvatar();
           }
+          audio.play().catch(() => {});
 
           const ears = hearing.current;
           if (ears) {
@@ -171,6 +181,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
                   ears.context.createMediaStreamSource(remote), speech
                 )
               );
+              callVoice = avatarBus.voice;
             } catch {}
           }
         };
@@ -187,6 +198,9 @@ export function useLiveCall({ onCaption, onError }: Options) {
         let lastInput = -Infinity;
         const listen = () => {
           if (!isCurrent()) return;
+          // Keep the local mouth clock on the remote utterance even while
+          // GPU video is visible, so a handoff cannot restart at word one.
+          if (face.current && callVoice) speech.sample(callVoice);
           const ear = avatarBus.ear;
           const measuring = ear?.context.state === "running";
           const now = performance.now();

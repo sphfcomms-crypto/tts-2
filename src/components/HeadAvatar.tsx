@@ -23,6 +23,7 @@ const LENS = 24;
 const CROP = { left: 0.14, top: 0.035, size: 0.72 };
 
 type Viewer = {
+  stop?: () => void;
   camera?: {
     fov: number;
     updateProjectionMatrix: () => void;
@@ -41,7 +42,19 @@ type Viewer = {
 // The renderer's own way of showing a scene at once (its SceneRevealMode.Instant).
 const AT_ONCE = 2;
 
-function frame(renderer: { viewer?: Viewer } | null) {
+type HeadRenderer = { dispose: () => void; render?: () => void; viewer?: Viewer };
+
+function dispose(renderer: HeadRenderer | null) {
+  if (!renderer) return;
+  // LAM clears its animation actions synchronously but disposes the viewer
+  // asynchronously. Stop its loop before those actions disappear. A scene
+  // still loading can also call render() once after its component unmounts.
+  renderer.render = () => {};
+  renderer.viewer?.stop?.();
+  renderer.dispose();
+}
+
+function frame(renderer: HeadRenderer | null) {
   const viewer = renderer?.viewer;
   if (!viewer) return;
   // By default she grows out of a blur over a few hundred frames, which on
@@ -69,7 +82,7 @@ export function HeadAvatar({ asset, onFail }: { asset: string; onFail: () => voi
 
   useEffect(() => {
     let gone = false;
-    let renderer: { dispose: () => void; viewer?: Viewer } | null = null;
+    let renderer: HeadRenderer | null = null;
     let lam: typeof import("gaussian-splat-renderer-for-lam") | null = null;
     const face = new Face();
     let last = performance.now();
@@ -97,7 +110,7 @@ export function HeadAvatar({ asset, onFail }: { asset: string; onFail: () => voi
         if (!renderer) throw new Error("the head renderer did not start");
         if (gone) {
           // The visitor left while she was loading.
-          renderer?.dispose();
+          dispose(renderer);
           return;
         }
         frame(renderer);
@@ -114,7 +127,7 @@ export function HeadAvatar({ asset, onFail }: { asset: string; onFail: () => voi
     return () => {
       gone = true;
       try {
-        renderer?.dispose();
+        dispose(renderer);
       } catch {}
       // The renderer keeps the one it made; let the next visit make a new one.
       if (lam) lam.GaussianSplatRenderer.instance = undefined;

@@ -1,6 +1,7 @@
 "use client";
 import dynamic from "next/dynamic";
 import React, { useEffect, useRef, useState } from "react";
+import { appStore } from "@/lib/store";
 import { avatarBus } from "@/lib/avatar/bus";
 import { canShowVideo, send } from "@/lib/avatar/liveTalk";
 import { VideoAvatar } from "./VideoAvatar";
@@ -41,6 +42,8 @@ async function findHead(): Promise<string> {
 }
 
 export function AvatarPanel() {
+  const localScriptAvatar = appStore.useState((state) => state.localScriptAvatar);
+  const localCallAvatar = appStore.useState((state) => state.localCallAvatar);
   const [video, setVideo] = useState<boolean | null>(null);
   // The clips the GPU box has prepared, by name.
   const [clips, setClips] = useState<string[]>([]);
@@ -90,7 +93,17 @@ export function AvatarPanel() {
     });
   }, [video, head, clips]);
 
-  if (video === null || head === null) return null;
-  if (video) return <VideoAvatar clips={clips} />;
-  return head ? <HeadAvatar asset={head} onFail={() => setHead("")} /> : <Avatar />;
+  const local = localCallAvatar || localScriptAvatar;
+  if (head === null || (video === null && !local)) return null;
+  if (video && !local) return <VideoAvatar clips={clips} />;
+  return (
+    <>
+      {head ? <HeadAvatar asset={head} onFail={() => setHead("")} /> : <Avatar />}
+      {localCallAvatar && (
+        <p role="status" className="text-center text-sm">
+          On-device animation is following the live call audio.
+        </p>
+      )}
+    </>
+  );
 }

@@ -1,4 +1,5 @@
 import { avatarBus, Stage } from "./bus";
+import { CallVideoHealth } from "./callVideoHealth";
 import { FPS, nudge, stageClock } from "./director";
 
 // Her lips, drawn on her moving body, for any voice that plays: a live call
@@ -248,6 +249,7 @@ export class LiveTalk {
   private needed: number[] = []; // how long recent pieces took to be ready
   private showing = false;
   private history: Trace[] = [];
+  private liveHealth: CallVideoHealth | undefined;
   private probeFailures = 0;
   private missingPieces = 0;
   private playbackReady = Promise.resolve();
@@ -260,7 +262,9 @@ export class LiveTalk {
     private voice: Voice,
     private onFail: () => void,
     private greet = false
-  ) {}
+  ) {
+    if ("stream" in voice) this.liveHealth = new CallVideoHealth();
+  }
 
   async start() {
     let context: AudioContext;
@@ -386,6 +390,7 @@ export class LiveTalk {
     this.gate.gain.value = 1;
     this.pausedUntil = 0;
     this.generation++;
+    if (this.liveHealth) this.liveHealth = new CallVideoHealth();
     this.speechRequests.abort();
     this.speechRequests = new AbortController();
     this.segments = [];
@@ -407,6 +412,7 @@ export class LiveTalk {
   }
 
   stop() {
+    if (this.stopped) return;
     this.stopped = true;
     this.endCalibration?.();
     this.speechRequests.abort();
@@ -674,6 +680,7 @@ export class LiveTalk {
     const lag = segment.lag;
     const generation = this.generation;
     this.segments.push(segment);
+    if (this.hasSpeech) this.liveHealth?.expect(segment.audioStart + lag);
     this.count.asked += 1;
     const asked = performance.now();
     let answered = asked;
@@ -700,6 +707,7 @@ export class LiveTalk {
         segment.mediaStart = mediaStart;
         this.count.joined += 1;
         const took = context.currentTime - segment.audioStart;
+        if (this.liveHealth?.joined(took - lag)) return this.fail();
         if (took > lag) {
           this.count.late += 1;
           this.lateRun += 1;
@@ -767,6 +775,10 @@ export class LiveTalk {
       // A late or absent piece must not leave the previous word on screen.
       this.show(false);
       if (!video.paused) video.pause();
+    }
+
+    if (this.liveHealth?.missedDeadline(context.currentTime, Boolean(segment), this.showing)) {
+      return this.fail();
     }
 
     // Between her lines, set the delay to what the pieces really need.
