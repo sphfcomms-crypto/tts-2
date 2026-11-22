@@ -20,13 +20,6 @@ import { Director, DISSOLVE, Unit } from "@/lib/avatar/director";
 
 const FILES = "/avatar/video";
 
-// Where her face can be, in any clip: only there is the video of her
-// speaking shown. Everything else stays the clip underneath, so that when
-// she speaks nothing changes but her face (the speaking video is coded
-// more lightly, and showing all of it made the whole picture shift).
-// An ellipse, given as shares of the picture, with a soft edge.
-const FACE = "radial-gradient(ellipse 10.4% 13.9% at 50.2% 30.8%, #000 70%, transparent 100%)";
-
 // Before the body-language clips existed there was one long listening
 // loop. It still serves when they are missing or not prepared on the box.
 const oneLoop = (): Unit[] => [
@@ -179,18 +172,15 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
     >
       <video ref={first} className={layer} style={{ zIndex: 2 }} muted playsInline preload="auto" />
       <video ref={second} className={layer} style={{ zIndex: 1 }} muted playsInline preload="auto" />
-      {/* Her speaking: the same frames with her lips drawn on. It comes and
-          goes in a few frames, so that a change of clip underneath is not
-          seen as a jump. */}
+      {/* MuseTalk already composites the mouth into its exact source frame.
+          Show that whole frame so the chin, eyes, neck and shoulders always
+          belong to the same instant, including during a seek or head turn. */}
       <video
         ref={talk}
         className={layer}
         style={{
           zIndex: 3,
           opacity: speaking ? 1 : 0,
-          transition: "opacity 40ms linear",
-          WebkitMaskImage: FACE,
-          maskImage: FACE,
         }}
         muted
         playsInline
@@ -204,7 +194,7 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
         alt=""
         draggable={false}
         className={`${layer} pointer-events-none select-none`}
-        style={{ zIndex: 4 }}
+        style={{ zIndex: 4, visibility: speaking ? "hidden" : "visible" }}
         onError={(event) => {
           event.currentTarget.style.display = "none";
         }}

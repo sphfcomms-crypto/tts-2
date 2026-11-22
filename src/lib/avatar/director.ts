@@ -291,7 +291,12 @@ export class Director {
       const cue = speechGesture(this.phrase());
       // One expressive movement is enough for a phrase. While she continues
       // explaining, open hands and small beats work without implying emotion.
-      const preferred = cue && cue !== this.lastCue ? ready.find((u) => u.name === cue) : undefined;
+      // A quiet first reply uses the take with a small head tilt and a
+      // relaxed jaw. Save the broad, two-handed take for a longer line.
+      let preferred = cue && cue !== this.lastCue ? ready.find((u) => u.name === cue) : undefined;
+      if (!preferred && previous && quiet(previous)) {
+        preferred = choice.find((unit) => unit.name === "talk_right");
+      }
       this.lastCue = cue;
       if (preferred && preferred !== previous) {
         choice = [preferred];
