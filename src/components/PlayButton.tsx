@@ -157,6 +157,7 @@ export default function PlayButton() {
           const face = await withFace(player.analyser);
           audioRef.current = {
             pause: () => {
+              report("play-stopped", face);
               player.stop();
               face.stop();
             },
