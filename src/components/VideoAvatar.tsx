@@ -20,6 +20,13 @@ import { Director, DISSOLVE, Unit } from "@/lib/avatar/director";
 
 const FILES = "/avatar/video";
 
+// Where her face can be, in any clip: only there is the video of her
+// speaking shown. Everything else stays the clip underneath, so that when
+// she speaks nothing changes but her face (the speaking video is coded
+// more lightly, and showing all of it made the whole picture shift).
+// An ellipse, given as shares of the picture, with a soft edge.
+const FACE = "radial-gradient(ellipse 10.4% 13.9% at 50.2% 30.8%, #000 70%, transparent 100%)";
+
 // Before the body-language clips existed there was one long listening
 // loop. It still serves when they are missing or not prepared on the box.
 const ONE_LOOP: Unit[] = [
@@ -105,6 +112,9 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
     listUnits(prepared.split(",")).then(async (units) => {
       if (gone) return;
       made = new Director(players, units, show);
+      // What she is doing at this moment (the effect below only hears of changes).
+      made.want =
+        avatarBus.mood === "thinking" ? "think" : avatarBus.mood === "listening" ? "listen" : "idle";
       director.current = made;
       const begin = () => {
         if (gone || !made || made.running) return;
@@ -173,9 +183,29 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
       <video
         ref={talk}
         className={layer}
-        style={{ zIndex: 3, opacity: speaking ? 1 : 0, transition: "opacity 40ms linear" }}
+        style={{
+          zIndex: 3,
+          opacity: speaking ? 1 : 0,
+          transition: "opacity 40ms linear",
+          WebkitMaskImage: FACE,
+          maskImage: FACE,
+        }}
         muted
         playsInline
+      />
+      {/* The room: one still picture laid over everything outside the zone
+          she moves in. It is not video, so it cannot flicker or shift from
+          clip to clip. (Made by avatar-build/video/units/lock_background.py.) */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={`${FILES}/room.webp`}
+        alt=""
+        draggable={false}
+        className={`${layer} pointer-events-none select-none`}
+        style={{ zIndex: 4 }}
+        onError={(event) => {
+          event.currentTarget.style.display = "none";
+        }}
       />
     </div>
   );
