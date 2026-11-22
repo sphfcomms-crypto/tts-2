@@ -31,6 +31,8 @@ type Listing = {
     name: string;
     frames: number;
     pool: Unit["pool"];
+    also?: Unit["pool"][];
+    weight?: number;
     mouths?: boolean;
     rise?: number;
     release?: number;
@@ -72,7 +74,7 @@ async function fetchClip(unit: Unit): Promise<Blob> {
 }
 
 // What she needs first comes first: something to sit and listen in.
-const ORDER: Unit["pool"][] = ["listen", "think", "talk", "greet"];
+const ORDER: Unit["pool"][] = ["listen", "idle", "think", "talk", "greet"];
 
 export function VideoAvatar({ clips }: { clips: string[] }) {
   const talk = useRef<HTMLVideoElement>(null);
@@ -149,7 +151,9 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
   // made, otherwise listening. (That she has begun to speak, the lip sync
   // tells the director itself, with the moment her voice will be heard.)
   useEffect(() => {
-    director.current?.turn(talking ? "talk" : mood === "thinking" ? "think" : "listen");
+    director.current?.turn(
+      talking ? "talk" : mood === "thinking" ? "think" : mood === "listening" ? "listen" : "idle"
+    );
   }, [talking, mood]);
 
   const layer = "absolute inset-0 w-full h-full object-cover";

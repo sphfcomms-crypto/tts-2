@@ -19,12 +19,19 @@
 // moves on top of whatever her body is doing. What her lips have been
 // drawn on is never changed afterwards (see claim).
 
-export type Pool = "listen" | "talk" | "greet" | "think";
-export type Want = "listen" | "talk" | "think";
+// idle: nobody is speaking and she is not being spoken to. listen: she is
+// being spoken to (a call, or the microphone is on).
+export type Pool = "idle" | "listen" | "talk" | "greet" | "think";
+export type Want = "idle" | "listen" | "talk" | "think";
 export type Unit = {
   name: string;
   frames: number;
   pool: Pool;
+  // Other moments it also suits (a quiet listening clip also suits idling).
+  also?: Pool[];
+  // How often it is chosen against the others of its pool (1 when absent):
+  // a large movement, like tidying her dupatta, is for now and then.
+  weight?: number;
   file: string;
   // Her own mouth moves in this clip (the generator made her talk). It is
   // only ever shown redrawn by the lip sync, never as it is.
@@ -72,8 +79,12 @@ export const stageClock = () => performance.now() / 1000;
 export const nudge = (behind: number) =>
   Math.abs(behind) < 0.012 ? 1 : 1 + Math.max(-0.15, Math.min(0.15, behind * 2));
 
+const inPool = (unit: Unit, pool: Pool) =>
+  unit.pool === pool || (unit.also?.includes(pool) ?? false);
 const suits = (unit: Unit, want: Want) =>
-  want === "talk" ? unit.pool === "talk" || unit.pool === "greet" : unit.pool === want;
+  want === "talk" ? inPool(unit, "talk") || inPool(unit, "greet") : inPool(unit, want);
+// Sitting quietly, whether idling or listening.
+const quiet = (unit: Unit) => inPool(unit, "idle") || inPool(unit, "listen");
 
 export class Director {
   // What she is doing; the next unit is chosen to suit it. Set with turn().
@@ -87,6 +98,7 @@ export class Director {
   private loaded: (Unit | null)[] = [null, null];
   private claimed = 0; // her lips have been asked for up to this moment
   private softNext = false; // the next unit planned follows a cut
+  private lately: string[] = []; // the units chosen most recently
 
   // players: two video elements, one on top of the other. One shows the
   // current unit while the other has the next one ready.
@@ -158,6 +170,9 @@ export class Director {
     this.softNext = false;
     // On her way back to rest she is left alone: what suits her now follows.
     if (suits(current.unit, want) || current.wrap) return;
+    // Between idling and listening nothing is cut short: both are her
+    // sitting quietly, and what follows is chosen to suit.
+    if ((want === "idle" || want === "listen") && quiet(current.unit)) return;
 
     const unit = current.unit;
     const rise = unit.rise ?? unit.frames;
@@ -243,12 +258,28 @@ export class Director {
       this.greet = false;
       pool = "greet";
     }
-    let choice = ready.filter((unit) => unit.pool === pool);
-    if (!choice.length) choice = ready.filter((unit) => unit.pool === "listen");
+    let choice = ready.filter((unit) => inPool(unit, pool));
+    if (!choice.length) choice = ready.filter((unit) => inPool(unit, "listen"));
     if (!choice.length) choice = ready;
-    // Not the same movement twice running, when there is another.
-    if (choice.length > 1) choice = choice.filter((unit) => unit !== previous);
-    return choice[Math.floor(Math.random() * choice.length)];
+    // Not a movement she has just made, when there are others.
+    const keep = Math.min(3, Math.floor(choice.length / 2));
+    const lately = keep ? this.lately.slice(-keep) : [];
+    const fresh = choice.filter((unit) => !lately.includes(unit.name) && unit !== previous);
+    if (fresh.length) choice = fresh;
+    else if (choice.length > 1) choice = choice.filter((unit) => unit !== previous);
+    // By weight.
+    let at = Math.random() * choice.reduce((sum, unit) => sum + (unit.weight ?? 1), 0);
+    let picked = choice[choice.length - 1];
+    for (const unit of choice) {
+      at -= unit.weight ?? 1;
+      if (at < 0) {
+        picked = unit;
+        break;
+      }
+    }
+    this.lately.push(picked.name);
+    if (this.lately.length > 6) this.lately.shift();
+    return picked;
   }
 
   private load(player: number, unit: Unit) {
