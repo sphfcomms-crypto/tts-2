@@ -9,39 +9,117 @@ error. Also checked: that the body under her lips is the clip and frame the lips
 """
 import json
 import sys
+import wave
+from pathlib import Path
 
 import numpy as np
 
-D = sys.argv[1]
-log = json.load(open(f"{D}/log.json"))
-audio = json.load(open(f"{D}/audio.json"))
-talk = log.get("talk")
-if not talk or not talk["pieces"]:
-    print(json.dumps({"error": "the page drew no lips in this recording"}))
-    sys.exit(0)
-pieces = sorted(talk["pieces"], key=lambda p: p["mediaStart"])
+# Each 20 ms interval of recorded speaker output counts once, even when the
+# browser draws slowly or the GPU never returns a piece. A frame-count based
+# denominator would omit precisely those failures.
+WINDOW_MS = 20
+AUDIBLE_RMS = 0.01
+
+
+def output_clock(entry):
+    rows = np.asarray(entry.get("clock", []), dtype=float)
+    if rows.ndim != 2 or rows.shape[1] < 2:
+        return None
+    # getOutputTimestamp() can return zeroes before audio starts.
+    rows = rows[np.isfinite(rows[:, :2]).all(axis=1) & (rows[:, 1] > 0)]
+    return rows if len(rows) else None
+
+
+def output_offset(clock):
+    return float(np.median(clock[:, 1] - 1000 * clock[:, 0]))
+
+
+def audible_overlay(directory, tracks, rows, origin_delta):
+    audible_bins = set()
+    measured_tracks = 0
+    for track in tracks:
+        clock = output_clock(track)
+        if clock is None or not track.get("file") or track.get("firstFrame") is None:
+            continue
+        path = directory / track["file"]
+        if not path.is_file():
+            continue
+        with wave.open(str(path), "rb") as wav:
+            if wav.getsampwidth() != 2 or wav.getnchannels() != 1:
+                continue  # record.mjs writes signed 16-bit mono PCM
+            rate = wav.getframerate()
+            samples = np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2")
+        start = origin_delta + output_offset(clock) + 1000 * track["firstFrame"] / rate
+        end = start + 1000 * len(samples) / rate
+        measured_tracks += 1
+        # Put every context on the same performance clock so overlapping
+        # output tracks cannot count the same audible time twice.
+        for index in range(int(np.floor(start / WINDOW_MS)), int(np.ceil(end / WINDOW_MS))):
+            first = max(0, round((index * WINDOW_MS - start) * rate / 1000))
+            last = min(len(samples), round(((index + 1) * WINDOW_MS - start) * rate / 1000))
+            if last > first:
+                chunk = samples[first:last].astype(np.float32)
+                if np.dot(chunk, chunk) > len(chunk) * (32768 * AUDIBLE_RMS) ** 2:
+                    audible_bins.add(index)
+
+    if not measured_tracks:
+        return None
+    times = np.array([perf for perf, _ in rows])
+    visible = np.array([
+        any(len(v) >= 6 and v[4] == 3 and v[3] >= 0.5 and v[5] >= 2 for v in videos)
+        for _, videos in rows
+    ], dtype=bool)
+    # At each window centre, the last logged picture is the one on screen.
+    # If there is no recorded picture or lip layer, that window is uncovered.
+    centres = (np.array(sorted(audible_bins)) + 0.5) * WINDOW_MS
+    shown = 0
+    if len(times):
+        frames = np.searchsorted(times, centres, side="right") - 1
+        observed = (frames >= 0) & (centres <= times[-1])
+        shown = int(visible[frames[observed]].sum())
+    total = len(audible_bins)
+    return {
+        "window_ms": WINDOW_MS,
+        "rms_threshold": AUDIBLE_RMS,
+        "audible_windows": total,
+        "windows_with_lip_overlay": shown,
+        "share": round(shown / total, 3) if total else None,
+    }
+
+
+directory = Path(sys.argv[1])
+log = json.loads((directory / "log.json").read_text())
+audio_path = directory / "audio.json"
+audio = json.loads(audio_path.read_text()) if audio_path.is_file() else {}
+tracks = audio.get("audio", [])
+pieces = sorted((log.get("talk") or {}).get("pieces", []), key=lambda p: p["mediaStart"])
+origin_delta = audio["origin"] - log["origin"] if "origin" in audio and "origin" in log else 0
+coverage = audible_overlay(directory, tracks, log["log"], origin_delta)
 starts = np.array([p["mediaStart"] for p in pieces])
 
 # The audio context her voice plays in: the one whose clock covers the pieces' times.
 best = None
-for a in audio["audio"]:
-    clock = np.array(a["clock"])
-    if not len(clock):
+for a in tracks:
+    clock = output_clock(a)
+    if clock is None:
         continue
     span = (clock[:, 0].min(), clock[:, 0].max())
     inside = sum(1 for p in pieces if span[0] - 5 <= p["audioStart"] <= span[1] + 5)
     if best is None or inside > best[0]:
         best = (inside, clock)
-clock = best[1]
-heard_offset = float(np.median(clock[:, 1] - clock[:, 0] * 1000))   # context time c is heard at c*1000 + this
-app_latency = float(np.median(np.where(clock[:, 4] > 0, clock[:, 4], clock[:, 5])))
+if best is not None:
+    clock = best[1]
+    heard_offset = origin_delta + output_offset(clock)
+    app_latency = 0
+    if clock.shape[1] >= 6:
+        app_latency = float(np.median(np.where(clock[:, 4] > 0, clock[:, 4], clock[:, 5])))
 
 errors, body, rows_speech, rows_shown = [], [], 0, 0
 wrong_clip = 0
 for perf, videos in log["log"]:
     lips = [v for v in videos if v[4] == 3]
     base = [v for v in videos if v[4] == 2]
-    if not lips:
+    if not lips or best is None:
         continue
     lips = lips[0]
     # Which instant of her voice (as captured) is being heard at this moment?
@@ -82,7 +160,8 @@ errors = np.array(errors)
 body = np.array(body)
 out = {
     "pieces": len(pieces),
-    "voice_delay_s": round(pieces[-1]["lag"], 2),
+    "voice_delay_s": round(pieces[-1]["lag"], 2) if pieces else None,
+    "audible_output_coverage": coverage,
     "moments_with_speech_drawn": rows_speech,
     "lips_showing_share": round(rows_shown / rows_speech, 3) if rows_speech else None,
     "lips_vs_voice_ms": None if not len(errors) else {
@@ -101,5 +180,7 @@ out = {
         "worst_frames": None if not len(body) else round(float(body[np.abs(body).argmax()]), 1),
     },
 }
+if not pieces:
+    out["error"] = "the page drew no lips in this recording"
 print(json.dumps(out, indent=1))
-json.dump(out, open(f"{D}/sync.json", "w"), indent=1)
+(directory / "sync.json").write_text(json.dumps(out, indent=1) + "\n")
