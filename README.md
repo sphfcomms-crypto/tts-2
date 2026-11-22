@@ -58,7 +58,8 @@ came back as unreadable rather than as made-up text.
 
 ## Her on screen
 
-"Show her" in Settings puts her at the top of the page, in one of two forms.
+"Show her" in Settings puts her at the top of the page, in the best of three
+forms that can be shown at that moment.
 
 **On video (photo-real), while a GPU box is running.** She is a fictional
 woman, filmed (generated) in short clips of body language: listening,
@@ -91,7 +92,25 @@ in the same seated pose, so any one can follow any other.
 - Her gestures are not chosen from the meaning of her words, and one
   begins only when the clip before it has ended (up to five seconds).
 
-**As a 3D character, when no box is running.** `public/avatar/avatar.glb`
+**As a photo-real 3D head, when no box is running.** The same woman, made
+from one picture of her by LAM (a model that turns a portrait into a head of
+"Gaussian splats": about twenty thousand soft dots, which is why it looks
+like the photograph and not like a mesh). It is one 4 MB file,
+`public/avatar/head/avatar.zip`, drawn by the browser itself with LAM's
+WebGL renderer (`src/components/HeadAvatar.tsx`): no server, no credits.
+
+- Her face is driven by `src/lib/avatar/face.ts`: fifty-two face shapes,
+  sixty times a second. Her mouth follows the sound of her voice (Play or a
+  live call), she blinks, her eyes move, her brows lift on stressed words,
+  and the renderer moves her head to suit what she is doing (listening,
+  thinking, speaking).
+- It is a head and neck only: no hands, no body language. Her skin is a
+  little softer than the photograph, and her earrings smear when she turns.
+- It was built on the PC's own graphics card (`avatar-build/lam/`: how LAM
+  was installed there, and `make_avatar.sh <picture> <out.zip>` to make
+  another in about a minute and a half).
+
+**As a 3D character, when the head cannot be drawn.** `public/avatar/avatar.glb`
 was built in Blender (MakeHuman base fitted to the same face, photo skin,
 52 face shapes, skeleton, clothes) and is drawn by the browser with
 three.js. Her mouth follows the sound of the voice; she breathes, blinks,

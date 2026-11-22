@@ -5,24 +5,52 @@ import { avatarBus } from "@/lib/avatar/bus";
 import { canShowVideo, send } from "@/lib/avatar/liveTalk";
 import { VideoAvatar } from "./VideoAvatar";
 
-// Her, at the top of the page. While the GPU box is running she is shown
-// on photo-real video. When it is not, the 3D character takes her place:
-// it is drawn by the browser itself and needs no server.
+// Her, at the top of the page, in the best form that can be shown:
+//   1. on photo-real video with body language, while a GPU box is running;
+//   2. as a photo-real 3D head drawn by the browser itself (no server),
+//      when that head has been made (public/avatar/head/avatar.zip);
+//   3. as the Blender-built 3D character, drawn by the browser too.
 
 // The 3D code is large and only runs in the browser: it loads separately.
 const Avatar = dynamic(
   () => import("./Avatar").then((module) => module.Avatar),
   { ssr: false }
 );
+const HeadAvatar = dynamic(
+  () => import("./HeadAvatar").then((module) => module.HeadAvatar),
+  { ssr: false }
+);
+
+// Her photo-real head, and (while developing only) LAM's own sample head to
+// try the renderer with before hers exists.
+const HEADS = [
+  "/avatar/head/avatar.zip",
+  ...(process.env.NODE_ENV !== "production" ? ["/avatar/head/sample.zip"] : []),
+];
+
+// The first of the head files that is there, or "" when none is.
+async function findHead(): Promise<string> {
+  for (const head of HEADS) {
+    try {
+      const res = await fetch(head, { method: "HEAD" });
+      const type = res.headers.get("content-type") || "";
+      if (res.ok && !type.includes("text/html")) return head;
+    } catch {}
+  }
+  return "";
+}
 
 export function AvatarPanel() {
   const [video, setVideo] = useState<boolean | null>(null);
   // The clips the GPU box has prepared, by name.
   const [clips, setClips] = useState<string[]>([]);
+  // The file of her photo-real head: null until looked for, "" if absent.
+  const [head, setHead] = useState<string | null>(null);
   const told = useRef(false);
 
   useEffect(() => {
     let alive = true;
+    findHead().then((found) => alive && setHead(found));
     const check = () =>
       fetch("/api/avatar/status")
         .then((res) => (res.ok ? res.json() : { video: false }))
@@ -37,20 +65,7 @@ export function AvatarPanel() {
           avatarBus.setDirect(direct);
           const names: string[] = Array.isArray(status.clips) ? status.clips : [];
           setClips((before) => (before.join() === names.join() ? before : names));
-          const onVideo = Boolean(status.video) && canShowVideo();
-          // Once per visit: which form of her this device is given, and why.
-          if (!told.current) {
-            told.current = true;
-            send({
-              kind: "view",
-              view: onVideo ? "video" : "3d",
-              gpu: Boolean(status.video),
-              canJoinVideo: canShowVideo(),
-              clips: names.length,
-              direct: Boolean(direct),
-            });
-          }
-          setVideo(onVideo);
+          setVideo(Boolean(status.video) && canShowVideo());
         })
         .catch(() => alive && setVideo(false));
     check();
@@ -61,6 +76,21 @@ export function AvatarPanel() {
     };
   }, []);
 
-  if (video === null) return null;
-  return video ? <VideoAvatar clips={clips} /> : <Avatar />;
+  // Once per visit: which form of her this device is given, and why.
+  useEffect(() => {
+    if (told.current || video === null || head === null) return;
+    told.current = true;
+    send({
+      kind: "view",
+      view: video ? "video" : head ? "head" : "3d",
+      gpu: clips.length > 0,
+      canJoinVideo: canShowVideo(),
+      clips: clips.length,
+      direct: Boolean(avatarBus.direct),
+    });
+  }, [video, head, clips]);
+
+  if (video === null || head === null) return null;
+  if (video) return <VideoAvatar clips={clips} />;
+  return head ? <HeadAvatar asset={head} onFail={() => setHead("")} /> : <Avatar />;
 }

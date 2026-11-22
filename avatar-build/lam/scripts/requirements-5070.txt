@@ -1,0 +1,41 @@
+# LAM requirements, relaxed for torch 2.7.1 + CUDA 12.8 (RTX 50-series) and trimmed to what
+# the single-image avatar pipeline actually imports. Differences from LAM's requirements.txt:
+#   numpy stays at LAM's 1.23.0 (chumpy needs numpy < 1.24); torch 2.7.1 runs fine with it
+#   scipy pinned to 1.13.1: LAM's landmark code imports scipy.integrate.simps, removed in 1.14
+#   dropped:tensorflow, face-detection-tflite, jaxlib (iris landmarks are off in app_lam.py),
+#            gradio (the model is run from a script), xformers (DINOv2 falls back to plain attention),
+#            simple-knn (never imported), rembg (matting is done by LAM's own StyleMatte)
+#   diffusers / accelerate pinned to versions that accept huggingface_hub 0.23.2
+numpy==1.23.0
+scipy==1.13.1
+omegaconf==2.3.0
+moviepy==1.0.3
+pandas==2.2.3
+transformers==4.41.2
+trimesh==4.4.9
+opencv_python_headless==4.11.0.86
+scikit-image==0.20.0
+pymcubes==0.1.6
+huggingface_hub==0.23.2
+diffusers==0.31.0
+accelerate==1.2.1
+safetensors
+Cython
+tyro
+einops
+plyfile
+jaxtyping
+typeguard
+loguru
+ninja
+matplotlib
+seaborn
+imageio
+imageio-ffmpeg
+pyyaml
+tqdm
+patool
+pillow
+iopath
+# the VHAP tracker imports torch.utils.tensorboard (LAM got it through tensorflow)
+tensorboard

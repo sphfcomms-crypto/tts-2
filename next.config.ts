@@ -11,6 +11,9 @@ const CSP = [
   // its own tunnel address (it changes every time the box starts).
   "connect-src 'self' blob: https://*.trycloudflare.com;",
   "media-src 'self' blob:;",
+  // Her photo-real 3D head sorts its dots in background workers that the
+  // renderer starts from memory.
+  "worker-src 'self' blob:;",
   "style-src 'self' 'unsafe-inline';",
   "img-src 'self' blob: data:;",
   "object-src 'none';",

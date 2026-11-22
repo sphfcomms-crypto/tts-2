@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "clsx": "^2.1.1",
+    "gaussian-splat-renderer-for-lam": "^0.0.9-alpha.2",
     "immer": "^10.1.1",
     "next": "^15.3.6",
     "pdfjs-dist": "^6.5.438",
