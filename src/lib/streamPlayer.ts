@@ -86,7 +86,7 @@ export class StreamPlayer {
     return this.stopped ? "" : this.playback.phraseAt(this.context.currentTime);
   }
 
-  async start(url: string, init: RequestInit = {}) {
+  async start(url: string, init: RequestInit = {}, readyForPlayback?: Promise<void>) {
     try {
       const headers = new Headers(init.headers);
       headers.set("Accept", PIECE_MEDIA_TYPE);
@@ -106,6 +106,7 @@ export class StreamPlayer {
       const replay = new ClipTimeline();
       let dataBytes = 0;
       for (let frame = await reader.next(); frame; frame = await reader.next()) {
+        if (!this.nextTime && readyForPlayback) await readyForPlayback;
         if (this.stopped) return;
         const { text, pcm, gapSamples } = frame;
         const fileTime = dataBytes / (2 * sampleRate);

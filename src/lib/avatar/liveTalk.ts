@@ -247,8 +247,11 @@ export class LiveTalk {
   private hold = FIRST_DELAY;
   private needed: number[] = []; // how long recent pieces took to be ready
   private showing = false;
-  private missingSince = 0;
   private history: Trace[] = [];
+  private probeFailures = 0;
+  private missingPieces = 0;
+  private playbackReady = Promise.resolve();
+  private endCalibration?: () => void;
   private directFailed = false; // the box could not be reached from here
 
   // greet: her first line is a hello (a call); she waves with it.
@@ -309,13 +312,45 @@ export class LiveTalk {
     (window as unknown as { __talk?: LiveTalk }).__talk = this;
     // A first, silent piece: it wakes the route to the GPU and shows how
     // long a piece takes before she has said anything.
+    if ("node" in this.voice) {
+      this.playbackReady = new Promise<void>((resolve) => {
+        const timer = window.setTimeout(() => {
+          // Calibration is still outstanding. Account for that lower bound
+          // when selecting the delay for the first audible samples.
+          this.needed.push(MAX_DELAY);
+          this.adapt();
+          this.endCalibration?.();
+        }, MAX_DELAY * 1000);
+        this.endCalibration = () => {
+          window.clearTimeout(timer);
+          this.endCalibration = undefined;
+          resolve();
+        };
+      });
+    }
     this.probe();
+  }
+
+  // Script generation begins while the GPU is being measured. Only the
+  // first scheduled sample (or cached clip playback) waits for the result.
+  get readyForPlayback() {
+    return this.playbackReady;
   }
 
   // Seconds between a sound being captured here and its picture being
   // due: the delay her voice is given, plus the little the loudspeaker is
   // believed to add, less the lead the picture is given.
   private lag(context: AudioContext) {
+    const stamp = context.getOutputTimestamp?.();
+    if (stamp?.contextTime && stamp.performanceTime) {
+      const elapsed = (performance.now() - stamp.performanceTime) / 1000;
+      const latency = context.currentTime - (stamp.contextTime + elapsed);
+      if (elapsed >= -0.02 && elapsed < 0.5 && latency >= -0.02 && latency < 0.5) {
+        // Locate the sample reaching this speaker, on this device. A fixed
+        // visual lead on top of that clock showed lips ~90 ms too early.
+        return this.hold + Math.max(0, latency);
+      }
+    }
     const said = context.outputLatency || context.baseLatency || 0;
     return this.hold + Math.min(said, MOST_LATENCY) - AHEAD;
   }
@@ -355,6 +390,7 @@ export class LiveTalk {
     this.speechRequests = new AbortController();
     this.segments = [];
     this.lateRun = 0;
+    this.missingPieces = 0;
     this.recent = new Int16Array(0);
     this.pending = new Int16Array(0);
     this.talking = this.drawing = false;
@@ -367,11 +403,12 @@ export class LiveTalk {
 
   // Still drawing, or still showing what was drawn.
   get busy() {
-    return this.drawing || this.showing;
+    return !this.stopped && (this.drawing || this.showing || this.hasSpeech);
   }
 
   stop() {
     this.stopped = true;
+    this.endCalibration?.();
     this.speechRequests.abort();
     window.clearInterval(this.clock);
     this.reel?.close();
@@ -469,10 +506,16 @@ export class LiveTalk {
     this.request(silence, Math.round(LEAD * this.rate), Math.round(LOOKAHEAD * this.rate), spot.unit.name, 0)
       .then(() => {
         if (this.stopped || this.failed) return;
-        this.needed.push(CHUNK + LOOKAHEAD + (performance.now() - began) / 1000);
+        const took = CHUNK + LOOKAHEAD + (performance.now() - began) / 1000;
+        this.needed.push(took);
         this.adapt();
+        // A fast path can start at once. On a slow path the overlapping
+        // probes estimate the sustained cost of sending speech pieces.
+        if (took + 0.25 <= FIRST_DELAY || this.needed.length >= 3) this.endCalibration?.();
       })
-      .catch(() => this.fail());
+      .catch(() => {
+        if (++this.probeFailures >= 3) this.fail();
+      });
     if (more > 0) {
       window.setTimeout(() => {
         if (!this.stopped && !this.failed && !this.drawing) this.probe(more - 1);
@@ -637,19 +680,23 @@ export class LiveTalk {
     const answer = this.request(audio, leadSamples, tailSamples, clip, start, this.speechRequests.signal).then((video) => {
       answered = performance.now();
       return video;
-    });
-    // Without this a failed answer would be reported as unhandled before
-    // its turn in the order comes.
-    answer.catch(() => {});
+    }).catch(() => null);
     this.order = this.order
       .then(async () => {
         if (generation !== this.generation || this.stopped) return -1;
         const video = await answer;
         if (generation !== this.generation || this.stopped) return -1;
+        if (!video) {
+          // The underlying body clip covers a missing piece. A single
+          // failed request must not cut off audio queued in the DelayNode.
+          if (++this.missingPieces >= 3) this.fail();
+          return -1;
+        }
+        this.missingPieces = 0;
         return reel.append(video);
       })
       .then((mediaStart) => {
-        if (generation !== this.generation || this.stopped) return;
+        if (mediaStart < 0 || generation !== this.generation || this.stopped) return;
         segment.mediaStart = mediaStart;
         this.count.joined += 1;
         const took = context.currentTime - segment.audioStart;
@@ -697,36 +744,29 @@ export class LiveTalk {
     const stale = found !== undefined && Math.abs(found.lag - lag) > 0.06;
     const segment = stale ? { ...found, mediaStart: -1 } : found;
 
-    if (segment) {
-      this.count.due += 1;
-      if (segment.mediaStart >= 0) this.count.shown += 1;
-    }
+    if (segment) this.count.due += 1;
     if (segment && segment.mediaStart >= 0) {
       const want = segment.mediaStart + (now - segment.audioStart);
       const behind = want - video.currentTime;
-      if (!video.paused) {
+      const seek = Math.abs(behind) > 2 / FPS;
+      if (seek && !video.seeking) {
+        video.currentTime = want;
+        video.playbackRate = 1;
+      } else if (!seek && !video.seeking) {
+        video.playbackRate = nudge(behind);
+      }
+      const ready = !seek && !video.seeking && !video.paused && video.readyState >= 2;
+      if (video.paused) video.play().catch(() => {});
+      this.show(ready);
+      if (ready) {
+        this.count.shown += 1;
         this.off.push(behind * 1000);
         if (this.off.length > 200) this.off.shift();
       }
-      if (video.paused || Math.abs(behind) > 0.15) {
-        video.currentTime = want;
-        video.playbackRate = 1;
-      } else {
-        // A small error is closed by playing a touch faster or slower,
-        // which is not seen; a jump of the picture would be.
-        video.playbackRate = nudge(behind);
-      }
-      if (video.paused) video.play().catch(() => {});
-      this.missingSince = 0;
-      this.show(true);
     } else {
-      // Nothing to show for this moment: she is silent, or the piece is
-      // late. A very short miss is ridden out on the last picture.
-      if (!this.missingSince) this.missingSince = performance.now();
-      if (performance.now() - this.missingSince > 120) {
-        if (!video.paused) video.pause();
-        this.show(false);
-      }
+      // A late or absent piece must not leave the previous word on screen.
+      this.show(false);
+      if (!video.paused) video.pause();
     }
 
     // Between her lines, set the delay to what the pieces really need.
@@ -777,7 +817,7 @@ export class LiveTalk {
   private adapt() {
     if (!this.delay || !this.needed.length || this.drawing) return;
     const sorted = [...this.needed].sort((x, y) => x - y);
-    const usual = sorted[Math.floor((sorted.length - 1) * 0.92)];
+    const usual = sorted[Math.ceil((sorted.length - 1) * 0.92)];
     // The slower the line, the more it varies: the margin grows with it.
     const margin = Math.max(0.2, 0.3 * (usual - CHUNK));
     const target = Math.min(MAX_DELAY, Math.max(MIN_DELAY, usual + margin + AHEAD));

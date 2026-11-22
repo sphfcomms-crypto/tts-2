@@ -220,8 +220,12 @@ export default function PlayButton() {
         } else direct();
       }
       if (active.current !== finish) return;
-      if (audio) await audio.play();
-      else if (player && init) await player.start("/api/generate", init);
+      if (audio) {
+        await face?.readyForPlayback;
+        if (active.current === finish) await audio.play();
+      } else if (player && init) {
+        await player.start("/api/generate", init, face?.readyForPlayback);
+      }
     } catch (err) {
       failed(err);
     }
