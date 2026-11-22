@@ -1,17 +1,22 @@
 "use client";
 import React, { useEffect, useRef, useState } from "react";
 import { avatarBus, Mood } from "@/lib/avatar/bus";
-import { Director, Unit } from "@/lib/avatar/director";
+import { Director, DISSOLVE, Unit } from "@/lib/avatar/director";
 
 // Her on video, photo-real.
 //
 // She is filmed in short clips of body language (listening, nodding, hand
 // gestures, a wave, a thoughtful look) that all start and end in the same
-// pose. The director plays them back to back on the two lower layers,
-// choosing by what she is doing. When she speaks, the GPU box draws her
-// lips on the very frames that are playing, and that video shows on the
-// top layer (see LiveTalk). The clips are plain files; only the lips need
-// the GPU.
+// pose. The director plays them on the two lower layers, choosing by what
+// she is doing. When she speaks, the GPU box draws her lips on the very
+// frames that are playing, and that video shows on the top layer (see
+// LiveTalk). The clips are plain files; only the lips need the GPU.
+//
+// The clips are fetched whole and played from memory. Streamed, a clip
+// needs the line to be faster than the clip plays, and the app's own line
+// is not (it was measured at 150 to 235 KB/s against 200 KB/s of video):
+// she froze. They are fetched from the GPU box's own address when it has
+// them, which is many times faster, and from the app otherwise.
 
 const FILES = "/avatar/video";
 
@@ -22,11 +27,18 @@ const ONE_LOOP: Unit[] = [
 ];
 
 type Listing = {
-  units?: { name: string; frames: number; pool: Unit["pool"]; mouths?: boolean }[];
+  units?: {
+    name: string;
+    frames: number;
+    pool: Unit["pool"];
+    mouths?: boolean;
+    rise?: number;
+    release?: number;
+  }[];
 };
 
 // clips: the names the GPU box has prepared; only those can carry her lips.
-async function loadUnits(clips: string[]): Promise<Unit[]> {
+async function listUnits(clips: string[]): Promise<Unit[]> {
   try {
     const res = await fetch(`${FILES}/units.json`);
     if (!res.ok) return ONE_LOOP;
@@ -40,12 +52,33 @@ async function loadUnits(clips: string[]): Promise<Unit[]> {
   }
 }
 
+// One clip, whole, from the GPU box if it answers quickly, else from the app.
+async function fetchClip(unit: Unit): Promise<Blob> {
+  const direct = avatarBus.direct;
+  if (direct && unit.file.includes("/units/")) {
+    try {
+      const res = await fetch(`${direct.url}/clip/${unit.name}.mp4`, {
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob.size > 10_000) return new Blob([blob], { type: "video/mp4" });
+      }
+    } catch {}
+  }
+  const res = await fetch(unit.file);
+  if (!res.ok) throw new Error(`clip ${unit.name} is missing`);
+  return new Blob([await res.blob()], { type: "video/mp4" });
+}
+
+// What she needs first comes first: something to sit and listen in.
+const ORDER: Unit["pool"][] = ["listen", "think", "talk", "greet"];
+
 export function VideoAvatar({ clips }: { clips: string[] }) {
   const talk = useRef<HTMLVideoElement>(null);
   const first = useRef<HTMLVideoElement>(null);
   const second = useRef<HTMLVideoElement>(null);
   const director = useRef<Director | null>(null);
-  const [front, setFront] = useState(0);
   const [speaking, setSpeaking] = useState(false);
   const [talking, setTalking] = useState(false);
   const [mood, setMood] = useState<Mood>(avatarBus.mood);
@@ -54,17 +87,48 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
   useEffect(() => {
     let gone = false;
     let made: Director | null = null;
-    loadUnits(prepared.split(",")).then((units) => {
+    const urls: string[] = [];
+    const players: [HTMLVideoElement, HTMLVideoElement] = [first.current!, second.current!];
+
+    // Brings one of the two players to the front, at once or through a
+    // dissolve (when the picture before it is in another pose).
+    const show = (front: number, soft: boolean) => {
+      const top = players[front];
+      const under = players[1 - front];
+      top.style.zIndex = "2";
+      under.style.zIndex = "1";
+      if (soft) top.animate([{ opacity: 0 }, { opacity: 1 }], { duration: DISSOLVE, easing: "linear" });
+    };
+
+    listUnits(prepared.split(",")).then(async (units) => {
       if (gone) return;
-      made = new Director([first.current!, second.current!], units, setFront);
+      made = new Director(players, units, show);
       director.current = made;
-      made.start();
-      avatarBus.setStage({
-        video: talk.current!,
-        speaking: setSpeaking,
-        talking: setTalking,
-        director: made,
-      });
+      const begin = () => {
+        if (gone || !made || made.running) return;
+        if (!units.some((unit) => unit.url && unit.pool === "listen")) return;
+        made.start();
+        avatarBus.setStage({
+          video: talk.current!,
+          speaking: setSpeaking,
+          talking: setTalking,
+          director: made,
+        });
+      };
+      // Two at a time, in the order she needs them. She starts as soon as
+      // she has one clip to listen in; the others join as they arrive.
+      const queue = [...units].sort((a, b) => ORDER.indexOf(a.pool) - ORDER.indexOf(b.pool));
+      const worker = async () => {
+        for (let unit = queue.shift(); unit && !gone; unit = queue.shift()) {
+          try {
+            const url = URL.createObjectURL(await fetchClip(unit));
+            urls.push(url);
+            unit.url = url;
+            begin();
+          } catch {}
+        }
+      };
+      await Promise.all([worker(), worker()]);
     });
     const stop = avatarBus.onMood(setMood);
     return () => {
@@ -73,14 +137,19 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
       made?.stop();
       director.current = null;
       avatarBus.setStage(null);
+      for (const player of players) {
+        player.removeAttribute("src");
+        player.load();
+      }
+      urls.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [prepared]);
 
-  // What her body does next: gestures while she talks, a thoughtful look
-  // while an answer is being made, otherwise listening.
+  // What her body does next: a thoughtful look while an answer is being
+  // made, otherwise listening. (That she has begun to speak, the lip sync
+  // tells the director itself, with the moment her voice will be heard.)
   useEffect(() => {
-    if (!director.current) return;
-    director.current.want = talking ? "talk" : mood === "thinking" ? "think" : "listen";
+    director.current?.turn(talking ? "talk" : mood === "thinking" ? "think" : "listen");
   }, [talking, mood]);
 
   const layer = "absolute inset-0 w-full h-full object-cover";
@@ -88,31 +157,19 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
   // A 4:3 picture, like the other side of a video call: the whole frame is
   // shown, at the size it was made, so it stays sharp.
   return (
-    <div className="relative mx-auto w-full max-w-[720px] aspect-[4/3] mb-10 rounded-lg overflow-hidden shadow-textarea bg-black">
-      <video
-        ref={first}
-        className={layer}
-        style={{ zIndex: front === 0 ? 2 : 1 }}
-        poster={`${FILES}/poster.jpg`}
-        muted
-        playsInline
-        preload="auto"
-      />
-      <video
-        ref={second}
-        className={layer}
-        style={{ zIndex: front === 1 ? 2 : 1 }}
-        muted
-        playsInline
-        preload="auto"
-      />
-      {/* Her speaking: the same frames with her lips drawn on. It is shown
-          the instant it is in step, with no fade, so nothing but her mouth
-          is seen to change. */}
+    <div
+      className="relative mx-auto w-full max-w-[720px] aspect-[4/3] mb-10 rounded-lg overflow-hidden shadow-textarea bg-black bg-cover bg-center"
+      style={{ backgroundImage: `url(${FILES}/poster.jpg)` }}
+    >
+      <video ref={first} className={layer} style={{ zIndex: 2 }} muted playsInline preload="auto" />
+      <video ref={second} className={layer} style={{ zIndex: 1 }} muted playsInline preload="auto" />
+      {/* Her speaking: the same frames with her lips drawn on. It comes and
+          goes in a few frames, so that a change of clip underneath is not
+          seen as a jump. */}
       <video
         ref={talk}
         className={layer}
-        style={{ zIndex: 3, opacity: speaking ? 1 : 0 }}
+        style={{ zIndex: 3, opacity: speaking ? 1 : 0, transition: "opacity 100ms linear" }}
         muted
         playsInline
       />

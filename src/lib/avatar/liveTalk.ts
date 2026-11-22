@@ -13,7 +13,9 @@ import { FPS, stageClock } from "./director";
 //   - the video pieces are joined, and a clock keeps the picture on the
 //     piece that belongs to the sound being heard at that moment.
 // Underneath, the same clips keep playing without the lips, so when she
-// stops speaking nothing changes but her mouth.
+// stops speaking nothing changes but her mouth. The director is told the
+// moment she begins a line (about a second before it is heard), and cuts
+// to a gesture that starts with her voice.
 //
 // If a piece is not back in time, the clip underneath shows for that
 // moment (her mouth closed) rather than a picture that is out of step. The
@@ -43,6 +45,14 @@ type Segment = {
   audioStart: number; // when this piece was spoken, on the audio clock
   length: number; // seconds
   mediaStart: number; // where its video sits in the joined video; -1 until it is in
+};
+
+// One drawn piece, as it was asked for and where it ended up: enough to
+// check afterwards, picture by picture, that her lips were in step.
+export type Trace = Segment & {
+  lag: number; // seconds between the sound being captured and being heard
+  clip: string; // the body-language clip it was drawn on
+  frame: number; // and the first frame of that clip
 };
 
 // Where her voice comes from: a call's audio stream, or a node of the
@@ -189,6 +199,7 @@ export class LiveTalk {
   private needed: number[] = []; // how long recent pieces took to be ready
   private showing = false;
   private missingSince = 0;
+  private history: Trace[] = [];
   private directFailed = false; // the box could not be reached from here
 
   // greet: her first line is a hello (a call); she waves with it.
@@ -244,6 +255,7 @@ export class LiveTalk {
     this.nodes = [delay, capture, hush];
 
     this.clock = window.setInterval(() => this.tick(), 40);
+    (window as unknown as { __talk?: LiveTalk }).__talk = this;
     // A first, silent piece: it wakes the route to the GPU and shows how
     // long a piece takes before she has said anything.
     this.probe();
@@ -276,6 +288,12 @@ export class LiveTalk {
     this.nodes = [];
     if (this.ownsContext) this.context?.close().catch(() => {});
     this.context = null;
+  }
+
+  // Every piece drawn so far (the last few hundred), for checking from the
+  // browser console (window.__talk.timeline()) or by a recording.
+  timeline() {
+    return { hold: this.hold, pieces: this.history };
   }
 
   // How it went, for the report the page sends when she has finished and
@@ -359,6 +377,10 @@ export class LiveTalk {
     const at = this.heard;
     this.heard += half.length;
     const loud = Math.sqrt(sum / half.length) > LOUD;
+    // When this block will be heard (and its picture seen), on the
+    // director's clock.
+    const lag = this.hold + (context.outputLatency || context.baseLatency || 0);
+    const seen = this.firstAt + at / this.rate + lag + (stageClock() - context.currentTime);
 
     // Is she in the middle of a line? (Her body gestures while she is.)
     if (loud) {
@@ -366,6 +388,9 @@ export class LiveTalk {
         this.talking = true;
         if (this.greet && this.lines === 0) this.stage.director.greet = true;
         this.lines += 1;
+        // The director is told now, about a second before she is heard,
+        // so that a gesture begins with her voice and not seconds later.
+        this.stage.director.turn("talk", seen);
         this.stage.talking(true);
       }
       this.quiet = 0;
@@ -380,8 +405,6 @@ export class LiveTalk {
     // In some gesture clips her own mouth moves. Such a clip is redrawn for
     // as long as it is on screen, sound or no sound, so that she is never
     // seen mouthing words nobody hears.
-    const lag = this.hold + (context.outputLatency || context.baseLatency || 0);
-    const seen = this.firstAt + at / this.rate + lag + (stageClock() - context.currentTime);
     const cover = this.stage.director.at(seen).unit.mouths === true;
     const active = this.talking || cover;
 
@@ -453,11 +476,14 @@ export class LiveTalk {
         from - context0,
         { audioStart: audioStart + taken / this.rate, length: samples / this.rate, mediaStart: -1 },
         spot.unit.name,
-        spot.frame
+        spot.frame,
+        lag
       );
       taken += samples;
       frames -= take;
       seen += take / FPS;
+      // What her lips are drawn on must now be shown as planned.
+      this.stage.director.claim(seen);
     }
   }
 
@@ -468,7 +494,8 @@ export class LiveTalk {
     leadSamples: number,
     segment: Segment,
     clip: string,
-    start: number
+    start: number,
+    lag: number
   ) {
     this.segments.push(segment);
     this.count.asked += 1;
@@ -482,6 +509,8 @@ export class LiveTalk {
       .then((mediaStart) => {
         segment.mediaStart = mediaStart;
         this.count.joined += 1;
+        this.history.push({ ...segment, lag, clip, frame: start });
+        if (this.history.length > 600) this.history.shift();
         this.needed.push(context.currentTime - segment.audioStart);
         if (this.needed.length > 30) this.needed.shift();
       })

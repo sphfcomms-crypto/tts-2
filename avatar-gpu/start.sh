@@ -51,6 +51,22 @@ if [ ! -f avatars/talk/meta.json ]; then
 fi
 KEY="$(cat key.txt)"
 
+# --- her body-language clips as the browser plays them: copied from the app once, served by /clip ---------
+SITES="${AVATAR_REGISTER_URLS:-}"
+[ -z "$SITES" ] && [ -f register_urls.txt ] && SITES="$(grep -v '^#' register_urls.txt | tr '\n' ' ')"
+mkdir -p web/units
+for r in $SITES; do
+  base="${r%/api/avatar/register}"
+  names="$(curl -fsS -m 20 "$base/avatar/video/units.json" 2>/dev/null | grep -o '"name": *"[a-z_0-9]*"' | grep -o '[a-z_0-9]*"$' | tr -d '"')"
+  for n in $names; do
+    [ -s "web/units/$n.mp4" ] && continue
+    curl -fsS -m 120 -o "web/units/$n.mp4.part" "$base/avatar/video/units/$n.mp4" 2>/dev/null \
+      && mv "web/units/$n.mp4.part" "web/units/$n.mp4" && say "fetched clip $n"
+  done
+  [ -n "$names" ] && break
+done
+rm -f web/units/*.part
+
 # run/*.pid survive on the persistent disk, so on a new box they may name some unrelated process:
 # a part only counts as alive when the process with that number is really ours.
 alive() {

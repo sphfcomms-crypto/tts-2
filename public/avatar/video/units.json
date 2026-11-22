@@ -17,34 +17,46 @@
    "name": "talk_open",
    "frames": 121,
    "pool": "talk",
-   "mouths": true
+   "mouths": true,
+   "rise": 7,
+   "release": 96
   },
   {
    "name": "talk_right",
    "frames": 121,
    "pool": "talk",
-   "mouths": true
+   "mouths": true,
+   "rise": 6,
+   "release": 95
   },
   {
    "name": "talk_chest",
    "frames": 121,
    "pool": "talk",
-   "mouths": true
+   "mouths": true,
+   "rise": 4,
+   "release": 101
   },
   {
    "name": "talk_shrug",
    "frames": 121,
-   "pool": "talk"
+   "pool": "talk",
+   "rise": 15,
+   "release": 94
   },
   {
    "name": "greet",
    "frames": 121,
-   "pool": "greet"
+   "pool": "greet",
+   "rise": 22,
+   "release": 107
   },
   {
    "name": "think",
    "frames": 121,
-   "pool": "think"
+   "pool": "think",
+   "rise": 26,
+   "release": 98
   }
  ]
 }

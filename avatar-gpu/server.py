@@ -679,7 +679,8 @@ def token_ok(query):
 
 class KeyGate:
     """Lets a request through when it carries x-avatar-key (the app's server), or a signed token in
-    its address for POST /speak (a browser), or asks for a kept piece by its secret id. Anything else
+    its address for POST /speak (a browser), or asks for a kept piece by its secret id, or for one
+    of her body-language clips (the same files the app serves to anyone). Anything else
     is answered 401 before it reaches a route. Answers to browsers get the cross-origin headers."""
 
     def __init__(self, inner):
@@ -705,7 +706,7 @@ class KeyGate:
 
         if method == "OPTIONS":
             return await answer(204)
-        allowed = (method == "GET" and path.startswith("/piece/")) or \
+        allowed = (method == "GET" and (path.startswith("/piece/") or path.startswith("/clip/"))) or \
                   (method == "POST" and path == "/speak" and token_ok(scope.get("query_string", b"")))
         if not allowed:
             return await answer(401, b'{"ok":false,"error":"unauthorized"}')
@@ -761,6 +762,20 @@ def piece(piece_id: str):
     if not found or found[0] < time.time():
         return _err(404, "no such piece (they are kept for two minutes)")
     return Response(found[1], media_type="video/mp4", headers={"Cache-Control": "no-store"})
+
+
+# Her body-language clips as the browser plays them (web/units/<name>.mp4, copied from the app by
+# start.sh). The app's own line was measured slower than the clips play; this one is not.
+WEB_CLIPS = os.path.join(ROOT, "web", "units")
+
+
+@app.get("/clip/{name}.mp4")
+def clip_file(name: str):
+    path = os.path.join(WEB_CLIPS, name + ".mp4")
+    if not name.replace("_", "").isalnum() or not os.path.isfile(path):
+        return _err(404, "no such clip")
+    with open(path, "rb") as f:
+        return Response(f.read(), media_type="video/mp4", headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.post("/speak")
