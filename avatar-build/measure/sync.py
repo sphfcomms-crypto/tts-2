@@ -49,7 +49,7 @@ for perf, videos in log["log"]:
     # Which piece covers it? (Each piece knows the delay its frames were chosen for.)
     due = None
     for p in pieces:
-        hold = p["lag"] - app_latency
+        hold = p.get("hold", p["lag"] - app_latency)
         a = c_out - hold
         if p["audioStart"] <= a < p["audioStart"] + p["length"]:
             due = (p, a)
@@ -68,7 +68,7 @@ for perf, videos in log["log"]:
     if not (shown["mediaStart"] <= t < shown["mediaStart"] + shown["length"] + 0.08):
         continue
     a_shown = shown["audioStart"] + (t - shown["mediaStart"])
-    hold = shown["lag"] - app_latency
+    hold = shown.get("hold", shown["lag"] - app_latency)
     errors.append((a_shown - (c_out - hold)) * 1000)      # + : picture ahead of the sound
     if base:
         b = base[0]

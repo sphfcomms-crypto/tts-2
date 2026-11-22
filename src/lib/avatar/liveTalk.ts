@@ -36,6 +36,16 @@ const MIN_DELAY = 0.9;
 const MAX_DELAY = 4;
 const SHORT = 3; // pieces of fewer frames than this are not made
 const DOWN = 3; // her voice is kept at a third of the device's rate (16 kHz)
+// Lips that move after the sound are noticed from about 45 ms; lips that
+// move before it are not noticed until about 125 ms. What is not known on
+// a device (how long its loudspeaker really takes, how long its screen
+// takes to show a frame) is therefore made up for on the early side: the
+// picture runs this far ahead of where the arithmetic puts the sound.
+const AHEAD = 0.09;
+// Browsers on phones say their sound takes 150 to 200 ms to come out.
+// Users there saw her lips move after the sound, so no more than this
+// much of what a browser says is believed.
+const MOST_LATENCY = 0.05;
 const TELL = 8; // seconds between reports while she is speaking
 
 export function canShowVideo(): boolean {
@@ -49,7 +59,8 @@ type Segment = {
   audioStart: number; // when this piece was spoken, on the audio clock
   length: number; // seconds
   mediaStart: number; // where its video sits in the joined video; -1 until it is in
-  lag: number; // seconds between its sound being captured and being heard, as planned
+  lag: number; // seconds between its sound being captured and its picture being due
+  hold: number; // seconds her voice was held back when it was asked for
 };
 
 // One drawn piece, as it was asked for and where it ended up: enough to
@@ -290,6 +301,14 @@ export class LiveTalk {
     this.probe();
   }
 
+  // Seconds between a sound being captured here and its picture being
+  // due: the delay her voice is given, plus the little the loudspeaker is
+  // believed to add, less the lead the picture is given.
+  private lag(context: AudioContext) {
+    const said = context.outputLatency || context.baseLatency || 0;
+    return this.hold + Math.min(said, MOST_LATENCY) - AHEAD;
+  }
+
   // How long after her voice has all been handed over she is still
   // speaking (the held-back sound playing out), in milliseconds.
   get tail() {
@@ -424,7 +443,7 @@ export class LiveTalk {
     const loud = Math.sqrt(sum / half.length) > LOUD;
     // When this block will be heard (and its picture seen), on the
     // director's clock.
-    const lag = this.hold + (context.outputLatency || context.baseLatency || 0);
+    const lag = this.lag(context);
     const seen = this.firstAt + at / this.rate + lag + (stageClock() - context.currentTime);
 
     // Is she in the middle of a line? (Her body gestures while she is.)
@@ -495,7 +514,7 @@ export class LiveTalk {
     this.pendingAt += count;
 
     // When this chunk will be seen, on the director's clock.
-    const lag = this.hold + (context.outputLatency || context.baseLatency || 0);
+    const lag = this.lag(context);
     let seen = audioStart + lag + (stageClock() - context.currentTime);
     let frames = Math.ceil((count / this.rate) * FPS - 0.001);
     let taken = 0; // samples of the chunk already given to a piece
@@ -519,7 +538,7 @@ export class LiveTalk {
         context,
         sound.slice(context0, from + samples),
         from - context0,
-        { audioStart: audioStart + taken / this.rate, length: samples / this.rate, mediaStart: -1, lag },
+        { audioStart: audioStart + taken / this.rate, length: samples / this.rate, mediaStart: -1, lag, hold: this.hold },
         spot.unit.name,
         spot.frame
       );
@@ -586,7 +605,7 @@ export class LiveTalk {
     const context = this.context;
     if (this.stopped || this.failed || !context) return;
     const video = this.stage.video;
-    const lag = this.hold + (context.outputLatency || context.baseLatency || 0);
+    const lag = this.lag(context);
     const now = context.currentTime - lag; // when what is heard now was spoken
 
     while (this.segments.length && this.segments[0].audioStart + this.segments[0].length < now - 2) {
@@ -657,7 +676,7 @@ export class LiveTalk {
     const context = this.context;
     if (!context || !this.delay || !this.gate) return;
     if (context.currentTime - this.stretchedAt < 3) return;
-    const target = Math.min(MAX_DELAY, took + Math.max(0.25, 0.3 * (took - CHUNK)));
+    const target = Math.min(MAX_DELAY, took + Math.max(0.25, 0.3 * (took - CHUNK)) + AHEAD);
     const add = target - this.hold;
     if (add < 0.15) return;
     const at = context.currentTime + 0.03;
@@ -683,7 +702,7 @@ export class LiveTalk {
     const usual = sorted[Math.floor((sorted.length - 1) * 0.92)];
     // The slower the line, the more it varies: the margin grows with it.
     const margin = Math.max(0.2, 0.3 * (usual - CHUNK));
-    const target = Math.min(MAX_DELAY, Math.max(MIN_DELAY, usual + margin));
+    const target = Math.min(MAX_DELAY, Math.max(MIN_DELAY, usual + margin + AHEAD));
     if (Math.abs(target - this.hold) > 0.12) {
       this.hold = target;
       this.delay.delayTime.value = target;

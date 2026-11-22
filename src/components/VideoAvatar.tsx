@@ -169,7 +169,7 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
       <video
         ref={talk}
         className={layer}
-        style={{ zIndex: 3, opacity: speaking ? 1 : 0, transition: "opacity 100ms linear" }}
+        style={{ zIndex: 3, opacity: speaking ? 1 : 0, transition: "opacity 40ms linear" }}
         muted
         playsInline
       />
