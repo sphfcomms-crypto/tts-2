@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CallTurns, transcriptSpan } from "@/lib/callTurns";
 import { appStore } from "@/lib/store";
 import { avatarBus } from "@/lib/avatar/bus";
-import { canShowVideo, LiveTalk, report } from "@/lib/avatar/liveTalk";
+import { CallCueHistory } from "@/lib/avatar/callAudioHandoff";
+import { canShowVideo, LiveTalk, report, type HeldCallAudio } from "@/lib/avatar/liveTalk";
 
 export type CallStatus = "idle" | "connecting" | "live";
 
@@ -138,6 +139,12 @@ export function useLiveCall({ onCaption, onError }: Options) {
         audio.autoplay = true;
         speaker.current = audio;
         let callVoice: AnalyserNode | null = null;
+        const cueHistory = new CallCueHistory();
+        timers.current.push(window.setInterval(() => {
+          if (face.current && callVoice) {
+            cueHistory.record(callVoice.context.currentTime, speech.sample(callVoice), speech.phrase());
+          }
+        }, 25));
         pc.ontrack = (event) => {
           if (!isCurrent()) return;
           const remote = event.streams[0] ?? new MediaStream([event.track]);
@@ -146,17 +153,33 @@ export function useLiveCall({ onCaption, onError }: Options) {
           // LiveTalk plays a delayed copy of the same remote voice, aligned
           // to the generated frames. Restore direct audio if video fails.
           const stage = avatarBus.stage;
-          const switchToLocalAvatar = () => {
+          const switchToLocalAvatar = (held?: HeldCallAudio) => {
             if (!isCurrent()) return;
-            // Stop the delayed speaker and all pending video before exposing
-            // the remote track. Keep WebRTC, the mic, and its captions live.
-            if (face.current) {
-              report("call-local", face.current);
-              face.current.stop();
-              face.current = null;
-            }
-            audio.muted = false;
             appStore.setState({ localCallAvatar: true });
+            const talk = face.current;
+            if (talk) report("call-local", talk);
+            const resumeDirect = () => {
+              if (!isCurrent() || face.current !== talk) return;
+              talk?.stop();
+              face.current = null;
+              audio.muted = false;
+            };
+            if (!held) {
+              resumeDirect();
+              return;
+            }
+            // During the drain the portrait hears the same gated output as
+            // the speaker and looks up the original word at its capture time.
+            const played = () => callVoice &&
+              cueHistory.at(callVoice.context.currentTime - held.delaySeconds());
+            const release = avatarBus.attachVoice(held.output, {
+              sample: () => played()?.shape ?? null,
+              phrase: () => played()?.phrase ?? "",
+            });
+            void held.drained.then(() => {
+              release();
+              resumeDirect();
+            });
           };
           if (stage && canShowVideo() && !face.current && !appStore.getState().localCallAvatar) {
             audio.muted = true;
@@ -198,9 +221,6 @@ export function useLiveCall({ onCaption, onError }: Options) {
         let lastInput = -Infinity;
         const listen = () => {
           if (!isCurrent()) return;
-          // Keep the local mouth clock on the remote utterance even while
-          // GPU video is visible, so a handoff cannot restart at word one.
-          if (face.current && callVoice) speech.sample(callVoice);
           const ear = avatarBus.ear;
           const measuring = ear?.context.state === "running";
           const now = performance.now();

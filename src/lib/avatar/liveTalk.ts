@@ -1,4 +1,5 @@
 import { avatarBus, Stage } from "./bus";
+import { CallAudioHandoff } from "./callAudioHandoff";
 import { CallVideoHealth } from "./callVideoHealth";
 import { FPS, nudge, stageClock } from "./director";
 
@@ -72,6 +73,12 @@ export type Trace = Segment & {
   took: number; // seconds from its first sound being captured to its video being in
   net: number; // of those, seconds from asking the box to having its answer
   wait: number; // and seconds the answer then waited for its turn and was joined on
+};
+
+export type HeldCallAudio = {
+  output: AudioNode;
+  delaySeconds: () => number;
+  drained: Promise<void>;
 };
 
 // Where her voice comes from: a call's audio stream, or a node of the
@@ -215,6 +222,7 @@ export class LiveTalk {
   private source: AudioNode | null = null;
   private delay: DelayNode | null = null;
   private gate: GainNode | null = null; // closes for the pause put into her voice
+  private lastSampleAt = -Infinity; // includes soft speech below the gesture detector
   private lastVoiceAt = -Infinity; // end of the last voiced block on the capture clock
   private interrupted = false; // waiting for the cut-off speaker's track to fall quiet
   private speechRequests = new AbortController();
@@ -250,6 +258,8 @@ export class LiveTalk {
   private showing = false;
   private history: Trace[] = [];
   private liveHealth: CallVideoHealth | undefined;
+  private handoff?: CallAudioHandoff;
+  private finishHandoff?: () => void;
   private probeFailures = 0;
   private missingPieces = 0;
   private playbackReady = Promise.resolve();
@@ -260,7 +270,7 @@ export class LiveTalk {
   constructor(
     private stage: Stage,
     private voice: Voice,
-    private onFail: () => void,
+    private onFail: (held?: HeldCallAudio) => void,
     private greet = false
   ) {
     if ("stream" in voice) this.liveHealth = new CallVideoHealth();
@@ -367,7 +377,8 @@ export class LiveTalk {
 
   // Includes her delayed audio, even when no video chunk was ready.
   get hasSpeech() {
-    return Boolean(this.context && this.context.currentTime < this.lastVoiceAt + this.hold);
+    const now = this.context?.currentTime;
+    return now !== undefined && now <= this.lastVoiceAt + (this.handoff?.remaining(now) ?? this.hold) + 0.06;
   }
 
   interrupt() {
@@ -376,6 +387,7 @@ export class LiveTalk {
     // A DelayNode retains every sample already sent to it. Disconnect and
     // replace it so an interrupted word cannot come out on the new turn.
     const old = this.delay;
+    if (this.handoff) this.hold = 0; // the caller intentionally interrupted the old turn
     this.source.disconnect(old);
     old.disconnect();
     const delay = context.createDelay(MAX_DELAY + 1);
@@ -385,7 +397,7 @@ export class LiveTalk {
     this.nodes = this.nodes.map((node) => node === old ? delay : node);
     this.interrupted = context.currentTime - this.lastVoiceAt < 0.16;
     if (!this.interrupted) this.source.connect(delay);
-    this.lastVoiceAt = -Infinity;
+    this.lastSampleAt = this.lastVoiceAt = -Infinity;
     this.gate.gain.cancelScheduledValues(context.currentTime);
     this.gate.gain.value = 1;
     this.pausedUntil = 0;
@@ -400,6 +412,10 @@ export class LiveTalk {
     this.pending = new Int16Array(0);
     this.talking = this.drawing = false;
     this.quiet = 0;
+    if (this.handoff) {
+      if (!this.interrupted) this.finishHandoff?.();
+      return;
+    }
     this.stage.video.pause();
     this.show(false);
     this.stage.director.cancelSpeech();
@@ -414,6 +430,7 @@ export class LiveTalk {
   stop() {
     if (this.stopped) return;
     this.stopped = true;
+    this.finishHandoff?.();
     this.endCalibration?.();
     this.speechRequests.abort();
     window.clearInterval(this.clock);
@@ -532,10 +549,10 @@ export class LiveTalk {
   // A block of her voice from the capture worklet, at the device's rate.
   private hear(block: Int16Array) {
     const context = this.context;
-    if (this.stopped || this.failed || !context) return;
+    if (this.stopped || !context || (this.failed && !this.handoff)) return;
     // Hiding the avatar or losing its GPU unmounts the stage during a call.
     // Hand the voice back to direct playback before asking for another pose.
-    if (!this.stage.director.running) return this.fail();
+    if (!this.handoff && !this.stage.director.running) return this.fail();
 
     // A third of the rate is plenty for the mouth, and a third of the upload.
     const half = new Int16Array(Math.floor(block.length / DOWN));
@@ -557,10 +574,19 @@ export class LiveTalk {
         this.interrupted = false;
         this.quiet = 0;
         this.source?.connect(this.delay);
+        if (this.handoff) this.finishHandoff?.();
       }
       return;
     }
     if (loud) this.lastVoiceAt = this.firstAt + this.heard / this.rate;
+    const silent = block.every((sample) => Math.abs(sample) <= 8);
+    if (!silent) this.lastSampleAt = context.currentTime;
+    if (this.handoff) {
+      // Choose a gap only when the entire pending interval is quiet. Use
+      // the peak of the original samples so a soft consonant survives.
+      if (this.handoff.drained(context.currentTime, silent)) this.finishHandoff?.();
+      return;
+    }
     // When this block will be heard (and its picture seen), on the
     // director's clock.
     const lag = this.lag(context);
@@ -848,8 +874,34 @@ export class LiveTalk {
   private fail() {
     if (this.failed || this.stopped) return;
     this.failed = true;
-    this.stop();
-    this.onFail();
+    const context = this.context;
+    if (!("stream" in this.voice) || !context || !this.delay || !this.gate ||
+        context.state !== "running" || context.currentTime > this.lastSampleAt + this.hold + 0.12) {
+      this.stop();
+      this.onFail();
+      return;
+    }
+
+    // Stop rendering immediately, but leave the sole audible graph connected
+    // until the samples already captured for this reply have played.
+    this.generation++;
+    this.speechRequests.abort();
+    window.clearInterval(this.clock);
+    this.reel?.close();
+    this.reel = null;
+    this.show(false);
+    this.stage.talking(false);
+    this.segments = [];
+    this.talking = this.drawing = false;
+    const handoff = new CallAudioHandoff(this.hold, Math.max(context.currentTime, this.pausedUntil), this.delay.delayTime);
+    this.handoff = handoff;
+    const drained = new Promise<void>((resolve) => {
+      this.finishHandoff = () => {
+        this.finishHandoff = undefined;
+        resolve();
+      };
+    });
+    this.onFail({ output: this.gate, delaySeconds: () => handoff.remaining(context.currentTime), drained });
   }
 }
 
