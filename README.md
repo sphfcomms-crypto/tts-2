@@ -11,9 +11,9 @@ demo for OpenAI's speech API.
 
 - **Play**: speaks the script. Roman Urdu, Hinglish or Urdu script goes in;
   it is first rewritten in Urdu script, in a young woman's words, with grammar
-  and punctuation fixed ("Urdu fix"), then spoken. Audio starts in about two
-  seconds: the script is spoken in sentence-sized pieces, generated in
-  parallel and streamed in order.
+  and punctuation fixed ("Urdu fix"), then spoken. The app can stream sentences
+  in order. When the avatar video needs buffering, Play waits for the picture
+  and voice to be ready together.
 - **Mic**: dictate the script. Speech is transcribed live and always arrives
   in Urdu script.
 - **Live call**: talk with her in real time (WebRTC straight to the voice
@@ -67,47 +67,26 @@ nodding, an open-hand gesture, a hand on her chest, a shrug, a wave, a
 thoughtful look (`public/avatar/video/units/`). Every clip starts and ends
 in the same seated pose, so any one can follow any other.
 
-- A director in the browser (`src/lib/avatar/director.ts`) plays the clips
-  and picks each next one by what she is doing: gestures while she talks, a
-  wave with her first line of a call, a thoughtful look while an answer is
-  being made, otherwise listening. It does not wait for a clip to end: it is
-  told the moment she begins a line, about a second before her voice is
-  heard, and cuts to a gesture that starts with her voice; when she stops,
-  the gesture is wrapped up (the picture skips, through a short dissolve,
-  to where her hands go back to her lap). `units.json` says, for each clip,
-  at which frame its movement begins and from which frame she returns to
-  rest.
-- The clips are fetched whole and played from memory, from the GPU box's
-  address when it has them (`GET /clip/<name>.mp4`) and from this app
-  otherwise. Streamed over this app's line, which is slower than the clips
-  play, she froze.
-- Her lips are drawn by a GPU box (`avatar-gpu/`, MuseTalk 1.5) on the very
-  frames that are playing (`src/lib/avatar/liveTalk.ts`): her voice, from
-  Play or from a live call, is held back about a second and cut into 0.4 s
-  chunks; each chunk comes back as silent video of her saying it on the
-  clip and frames that will be on screen when it is heard, and a clock
-  keeps the picture on the chunk being heard. The voice itself is not
-  touched. Measured on the box's output, her mouth moves with the sound at
-  an offset of 0 ms.
-- The browser fetches the video from the box's own tunnel address with a
-  short-lived signed token. It does not pass through this app, whose Funnel
-  was measured to carry video slower than it plays.
-- The box is rented by the hour and tells the app where it is when it
-  starts (`POST /api/avatar/register`, secret `AVATAR_GPU_KEY`). To start
-  one, see `avatar-gpu/README.md`.
-- When she has finished speaking the page reports how the lip sync kept up
-  on that device (pieces asked and joined, how late, the share of her
-  speech that had lips) to `POST /api/avatar/report`, which writes one line
-  to the server log.
-- The director looks for a greeting, question, thanks or other familiar cue
-  in the current Urdu, Roman Urdu or English phrase and picks a matching
-  gesture when a suitable clip is loaded.
-- How well it works is measured, not judged by eye: `avatar-build/measure/`
-  records the live page at real speed in a real browser (every picture and
-  every sample of sound, on one clock) and compares her lips with her voice
-  picture by picture. On the live site on 2026-11-22: Play, the picture
-  within 3 ms of her voice throughout; a call, within 45 ms for 98% of the
-  time; idle, 25 pictures a second with no stalls.
+- The browser selects listening, thinking and speaking clips. During live
+  speech, a greeting, question or thanks can cue a gesture when the matching
+  clip is available. The GPU uses MuseTalk 1.5 to draw the mouth from the
+  actual voice on the selected source frames. The speaking picture includes
+  her face, head and shoulders in one frame.
+- On a fast connection, the browser schedules short video pieces against the
+  speaker output clock. When the direct GPU connection is too slow for Play,
+  a compatible browser prepares the script as a single movie before starting.
+  It fetches the pictures through the app relay and places the entire recording
+  on one continuous audio track. Replay can reuse the prepared movie.
+- During a live call, a slow connection can leave the voice audible before
+  the first rendered frame arrives. If the renderer misses its deadlines,
+  the browser switches to on-device facial animation for that call and
+  continues using the same voice connection.
+- The rented GPU registers with the app when it starts. See
+  `avatar-gpu/README.md` for setup and `avatar-build/measure/README.md` for
+  browser recordings. The measurement report counts how much audible speech
+  had a visible lip frame and separately measures timing where a matching
+  frame arrived. To assess mouth shapes, teeth or head motion, inspect the
+  rendered picture with the spoken line.
 
 **As a photo-real 3D head, when no box is running.** The same woman, made
 from one picture of her by LAM (a model that turns a portrait into a head of
