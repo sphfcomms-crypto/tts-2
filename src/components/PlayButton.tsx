@@ -4,10 +4,11 @@ import { Button } from "./ui/Button";
 import { appStore } from "@/lib/store";
 import { clipScript, fetchSpeech, speechRequest } from "@/lib/files";
 import { refreshEngineStatus } from "./EngineStatus";
-import { getClipTimeline, StreamPlayer } from "@/lib/streamPlayer";
+import { getClipTimeline, readSpeechClip, StreamPlayer } from "@/lib/streamPlayer";
 import { alignSpeech, sampleSpeech } from "@/lib/avatar/articulation";
 import { avatarBus, type SpeechCues } from "@/lib/avatar/bus";
 import { LiveTalk, report, settled } from "@/lib/avatar/liveTalk";
+import { bufferedMovie, needsBuffer, playMovie } from "@/lib/avatar/bufferedPlayback";
 import s from "./ui/Footer.module.css";
 
 const PlayingWaveform = ({
@@ -74,6 +75,7 @@ export default function PlayButton() {
       if (active.current !== finish) return;
       active.current = null;
       abort.abort();
+      appStore.setState({ localScriptAvatar: false });
       window.clearInterval(interval);
       window.clearTimeout(tailTimer);
       player?.stop();
@@ -158,11 +160,46 @@ export default function PlayButton() {
         }
       }
 
+      const stage = avatarBus.stage;
+      // The GPU may have registered before its visible stage is ready.
+      // Hold the local renderer for this utterance so it owns every mouth cue.
+      let localFallback = requestState.avatar && !stage;
+      if (localFallback) appStore.setState({ localScriptAvatar: true });
+      let resumeAt = 0;
+      const bufferVideo = ctx && stage && await needsBuffer(stage, clip, abort.signal);
+      if (bufferVideo && !stage.video.canPlayType('audio/mp4; codecs="flac"')) {
+        appStore.setState({ localScriptAvatar: true });
+        localFallback = true;
+      }
+      if (ctx && stage && bufferVideo && !localFallback) {
+        if (!clip && init) {
+          clip = await readSpeechClip("/api/generate", { ...init, signal: abort.signal });
+          if (active.current !== finish) return;
+          cache(clip);
+        }
+        if (clip) {
+          try {
+            const movie = await bufferedMovie(clip, stage, abort.signal);
+            abort.signal.throwIfAborted();
+            await playMovie(movie, stage, abort.signal, onPlay, seconds => { resumeAt = seconds; });
+            finish();
+            return;
+          } catch (err) {
+            if (abort.signal.aborted) return;
+            console.warn("Using on-device avatar for this script:", err);
+            appStore.setState({ localScriptAvatar: true });
+            localFallback = true;
+          }
+        }
+      }
+      if (active.current !== finish) return;
+
       let cues: SpeechCues | undefined;
       if (clip) {
         objectUrl = URL.createObjectURL(clip);
         const element = new Audio(objectUrl);
         audio = element;
+        if (resumeAt > 0) audio.currentTime = resumeAt;
         audio.onplay = onPlay;
         audio.onended = onEnded;
         audio.onerror = () => failed(element.error);
@@ -209,8 +246,7 @@ export default function PlayButton() {
         const direct = () => {
           if (active.current === finish) voice.connect(output);
         };
-        const stage = avatarBus.stage;
-        if (stage) {
+        if (stage && stage.director.running && !localFallback) {
           face = new LiveTalk(stage, { context: ctx, node: voice }, direct);
           try { await face.start(); } catch {
             face.stop();

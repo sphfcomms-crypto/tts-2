@@ -129,6 +129,13 @@ export class Director {
     private phrase: () => string = () => ""
   ) {}
 
+  // A scripted shot can be prepared from any unit installed on the GPU,
+  // even while the idle player's local copy is still downloading.
+  get scriptedClip() {
+    return this.units.find((unit) => unit.name === "talk_right")?.name ??
+      this.units.find((unit) => unit.pool === "talk")?.name ?? this.units[0].name;
+  }
+
   get running() {
     return this.slots.length > 0;
   }
