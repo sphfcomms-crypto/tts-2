@@ -148,6 +148,11 @@ than 120 s).
 in pauses off), `AVATAR_SILENCE_MIN_FRAMES` (5), `AVATAR_MEL_REF` (0.6), `AVATAR_MAX_SECONDS` (120),
 `AVATAR_CUDA_GRAPH` (1), `AVATAR_PORT` (8000). Read by `keeper.sh`: `AVATAR_IDLE_MINUTES` (30).
 
+`AVATAR_ARTICULATION_DELAY_FRAMES` defaults to 1 at 25 fps. It selects the preceding
+40 ms frame of speech when generating the mouth, using the preceding chunk's audio
+when available. The body and output audio retain their original timestamps. Set it to
+0 to use the unadjusted model timing. The maximum is 2 frames.
+
 ## Files
 
 | file | what |

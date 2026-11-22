@@ -61,6 +61,8 @@ _ref = os.environ.get("AVATAR_MEL_REF", "0.6")
 MEL_REF = float(_ref) if _ref not in ("", "off") else None       # see Engine.log_mel
 SILENCE_RMS = float(os.environ.get("AVATAR_SILENCE_RMS", "0.003"))     # see silence_gate; 0 switches it off
 SILENCE_MIN_FRAMES = int(os.environ.get("AVATAR_SILENCE_MIN_FRAMES", "5"))
+# The learned lip shapes lead the recorded voice by one to two 25 fps frames.
+ARTICULATION_DELAY = max(0, min(2, int(os.environ.get("AVATAR_ARTICULATION_DELAY_FRAMES", "1"))))
 
 # H.264: x264, High profile, no B-frames (the first frame of every piece sits at time 0), a
 # keyframe at the start and every 25 frames, constant quality capped at a bit rate.
@@ -202,6 +204,28 @@ def silence_gate(wav16, lead16, n_frames):
                     g[index + 1] = max(g[index + 1], min(0.60 * onset_rest, 1 - soft / following))
     g = g[before:before + n_frames]
     return g if g.any() else None
+
+
+def articulation_timing(wav16, lead16, n_frames, delay_frames):
+    """Whisper and rest-gate positions. Body frames and played PCM keep their own clock."""
+    current_gate = silence_gate(wav16, lead16, n_frames)
+    if not delay_frames or len(wav16) <= 640:
+        return lead16 // 320, current_gate
+
+    origin = lead16 - delay_frames * 640
+    # At a chunk join, read the preceding recorded sound. Only the beginning
+    # of an utterance can have no preceding audio in the request.
+    missing = max(0, -origin)
+    gate_audio = np.pad(wav16, (missing, 0)) if missing else wav16
+    shifted = silence_gate(gate_audio, max(0, origin), n_frames)
+    if SILENCE_RMS > 0 and missing >= 640:
+        if shifted is None:
+            shifted = np.zeros(n_frames, np.float32)
+        shifted[:missing // 640] = 1
+    # When the recorded voice already pauses, keep the existing rest pose.
+    if current_gate is not None:
+        shifted = current_gate if shifted is None else np.maximum(current_gate, shifted)
+    return origin // 320, shifted
 
 
 # ----------------------------------------------------------------------------- clips
@@ -473,7 +497,7 @@ class Engine:
         z = f.new_zeros
         f = torch.cat([z(4, 5, 384), f, z(max(0, need - 4 - f.shape[0]) + 12, 5, 384)], 0)
         idx = lead_steps + 2 * torch.arange(n_frames, device=self.dev)[:, None] + torch.arange(10, device=self.dev)[None]
-        return f[idx].reshape(n_frames, 50, 384)                         # 10 steps x 5 layers per frame
+        return f[idx.clamp_min(0)].reshape(n_frames, 50, 384)                         # 10 steps x 5 layers per frame
 
     # -- the UNet step ---------------------------------------------------------------------------------
     def capture_unet_graphs(self):
@@ -669,8 +693,9 @@ class Engine:
             y = np.pad(y, (0, max(0, want - len(y))))[:want]
             pcm48 = np.clip(np.rint(y * 32767.0), -32768, 32767).astype(np.int16)
         lead16 = lead16 // 320 * 320
-        return Job(clip=clip, start=start % clip.cycle, wav16=wav16, lead_steps=lead16 // 320, n_frames=int(n_frames),
-                   gate=silence_gate(wav16, lead16, int(n_frames)), seconds=seconds, pcm48=pcm48, emit=emit,
+        lead_steps, gate = articulation_timing(wav16, lead16, int(n_frames), ARTICULATION_DELAY)
+        return Job(clip=clip, start=start % clip.cycle, wav16=wav16, lead_steps=lead_steps, n_frames=int(n_frames),
+                   gate=gate, seconds=seconds, pcm48=pcm48, emit=emit,
                    t_recv=t_recv, lead_ms=lead_ms, warm=warm, stats=None)
 
     def warm_up(self):

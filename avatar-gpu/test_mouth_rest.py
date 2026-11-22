@@ -1,12 +1,50 @@
 """Run from the prepared GPU service directory with venv/bin/python test_mouth_rest.py."""
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
-from server import silence_gate, source_lip_rest
+from server import Engine, articulation_timing, silence_gate, source_lip_rest
 
 
 class MouthRestTest(unittest.TestCase):
+    def test_calibration_uses_recorded_context_across_a_chunk_join(self):
+        x = np.full(640 * 17, 0.09, np.float32)
+        x[640 * 2:640 * 10] = 0
+        steps, gate = articulation_timing(x, 0, 17, 1)
+        self.assertEqual(steps, -2)
+        self.assertEqual(gate[0], 1)
+        # The middle of a chunk and its tail must have the same positions
+        # and gates as the same recording submitted as a single clip.
+        steps, mid = articulation_timing(x[640:640 * 16], 4 * 640, 8, 1)
+        self.assertEqual(steps, 6)
+        np.testing.assert_array_equal(mid, gate[5:13])
+        self.assertEqual(gate[6], 1)
+        self.assertEqual(articulation_timing(x[:643], 320, 1, 1)[0], -1)
+
+    def test_optional_calibration_and_one_frame_terminal_audio(self):
+        x = np.full(619, 0.1, np.float32)
+        self.assertEqual(articulation_timing(x, 0, 1, 1), (0, None))
+        voice = np.pad(x, (640, 0))
+        steps, gate = articulation_timing(voice, 640, 1, 0)
+        self.assertEqual(steps, 2)
+        np.testing.assert_array_equal(gate, silence_gate(voice, 640, 1))
+
+    def test_calibration_preserves_partial_final_frame_body_and_sound(self):
+        x = np.linspace(-0.2, 0.2, 7311, dtype=np.float32)
+        clip = SimpleNamespace(cycle=240)
+        def make(delay):
+            with patch("server.ARTICULATION_DELAY", delay):
+                return Engine.make_job(None, clip, 247, x, 24000, 120, 47, True, None, 0)
+        original, corrected = make(0), make(1)
+        self.assertEqual(corrected.start, original.start)
+        self.assertEqual(corrected.n_frames, original.n_frames)
+        self.assertEqual(corrected.seconds, original.seconds)
+        self.assertEqual(corrected.lead_steps, original.lead_steps - 2)
+        np.testing.assert_array_equal(corrected.wav16, original.wav16)
+        np.testing.assert_array_equal(corrected.pcm48, original.pcm48)
+
     def test_tilt_does_not_change_the_measured_gap(self):
         lm = np.zeros((3, 68, 2), dtype=np.float32)
         lm[:, 54] = [40, 0]
