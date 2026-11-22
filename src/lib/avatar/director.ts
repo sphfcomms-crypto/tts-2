@@ -124,7 +124,7 @@ export class Director {
   // a dissolve.
   constructor(
     private players: [HTMLVideoElement, HTMLVideoElement],
-    private units: Unit[],
+    readonly units: readonly Unit[],
     private show: (front: number, soft: boolean) => void,
     private phrase: () => string = () => ""
   ) {}
@@ -132,8 +132,8 @@ export class Director {
   // A scripted shot can be prepared from any unit installed on the GPU,
   // even while the idle player's local copy is still downloading.
   get scriptedClip() {
-    return this.units.find((unit) => unit.name === "talk_right")?.name ??
-      this.units.find((unit) => unit.pool === "talk")?.name ?? this.units[0].name;
+    return this.units.find((unit) => unit.name === "talk_right") ??
+      this.units.find((unit) => unit.pool === "talk") ?? this.units[0];
   }
 
   get running() {

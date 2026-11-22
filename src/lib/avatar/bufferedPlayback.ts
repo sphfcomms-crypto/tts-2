@@ -1,5 +1,7 @@
 import { avatarBus, type Direct, type Stage } from "./bus";
 import { FPS } from "./director";
+import { getClipTimeline } from "../streamPlayer";
+import { scriptedShots, type ScriptShot } from "./scriptedShots";
 
 const RATE = 24000;
 const PER_FRAME = RATE / FPS;
@@ -11,14 +13,19 @@ let encoderRegistered = false;
 
 // Every chunk begins on a video frame. The last frame can extend beyond
 // the final audio sample by less than one frame period.
-export function renderWindows(samples: number) {
+export function renderWindows(samples: number, shots: readonly ScriptShot[]) {
   const windows = [];
-  for (let start = 0; start < samples; start += CHUNK_FRAMES * PER_FRAME) {
-    const end = Math.min(samples, start + CHUNK_FRAMES * PER_FRAME);
-    const lead = Math.min(start, CONTEXT);
-    // Context is described in whole milliseconds to the GPU.
-    const tail = Math.floor(Math.min(samples - end, CONTEXT) / (RATE / 1000)) * (RATE / 1000);
-    windows.push({ start, end, lead, tail, frame: start / PER_FRAME, frames: Math.ceil((end - start) / PER_FRAME) });
+  for (const shot of shots) {
+    for (let sourceFrame = 0; sourceFrame < shot.frames; sourceFrame += CHUNK_FRAMES) {
+      const frames = Math.min(CHUNK_FRAMES, shot.frames - sourceFrame);
+      const frame = shot.frame + sourceFrame;
+      const start = frame * PER_FRAME;
+      const end = Math.min(samples, (frame + frames) * PER_FRAME);
+      const lead = Math.min(start, CONTEXT);
+      // Neighbouring sound supplies context even across a change of gesture.
+      const tail = Math.floor(Math.min(samples - end, CONTEXT) / (RATE / 1000)) * (RATE / 1000);
+      windows.push({ clip: shot.clip, sourceFrame, frame, frames, start, end, lead, tail });
+    }
   }
   return windows;
 }
@@ -54,7 +61,7 @@ export async function needsBuffer(stage: Stage, clip: Blob | null, signal: Abort
   // A URL in the registration doesn't prove this browser can POST to it.
   // A direct 400 ms render must fit well inside the live path's playout delay.
   try {
-    const res = await fetch(directUrl(direct, stage.director.scriptedClip, 0, 0, 0), {
+    const res = await fetch(directUrl(direct, stage.director.scriptedClip.name, 0, 0, 0), {
       method: "POST", body: new Blob([wav(new Float32Array(RATE * 0.4))]),
       signal: AbortSignal.any([signal, AbortSignal.timeout(900)]),
     });
@@ -79,7 +86,9 @@ export async function bufferedMovie(clip: Blob, stage: Stage, signal: AbortSigna
   }
 
   const samples = audio.getChannelData(0);
-  const shot = stage.director.scriptedClip;
+  const timeline = getClipTimeline(clip);
+  const shots = scriptedShots(samples, RATE, stage.director.units, stage.director.scriptedClip,
+    seconds => timeline?.phraseAt(seconds) ?? "");
   const videoTrack = new media.EncodedVideoPacketSource("avc");
   const voice = new media.AudioBufferSource({ codec: "flac" });
   const out = new media.Output({ format: new media.Mp4OutputFormat(), target: new media.BufferTarget() });
@@ -93,11 +102,11 @@ export async function bufferedMovie(clip: Blob, stage: Stage, signal: AbortSigna
   const requests = new AbortController();
   const drawSignal = AbortSignal.any([signal, requests.signal]);
   async function picture() {
-    for (const win of renderWindows(samples.length)) {
+    for (const win of renderWindows(samples.length, shots)) {
       signal.throwIfAborted();
       if (!stage.director.running) throw new Error("Video stage closed");
       const lead = win.lead / (RATE / 1000), tail = win.tail / (RATE / 1000);
-      const query = new URLSearchParams({ clip: shot, start: String(win.frame), lead: String(lead), tail: String(tail) });
+      const query = new URLSearchParams({ clip: win.clip, start: String(win.sourceFrame), lead: String(lead), tail: String(tail) });
       const response = await fetch(`/api/avatar/chunk?${query}`, {
         method: "POST", headers: { "Content-Type": "audio/wav" },
         body: wav(samples.subarray(win.start - win.lead, win.end + win.tail)),
