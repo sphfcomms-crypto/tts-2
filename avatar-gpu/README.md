@@ -52,6 +52,27 @@ tunnel address is registered with the app by itself.
 
 (`patch_idle.py` made this edit to `server.py` and `keeper.sh`; it is already applied.)
 
+The platform has the same switch, and it is the one that acts first: a box is rented with
+`auto_pause_minutes` (30 is used), and it ends that long after the GPU last did any work. The
+running server does not count as work: a box rented with 10 ended fifteen minutes after her last
+speech with the server up and its model loaded.
+
+## JupyterLab on the box (`jupyter.sh`)
+
+```
+bash /workspace/jupyter/start.sh           # start it, or find it running; safe to repeat
+cat /workspace/jupyter/run/url.txt         # the link, with its token
+bash /workspace/jupyter/start.sh --stop
+```
+
+`jupyter.sh` here is that `start.sh`. It installs JupyterLab into the box's own Python
+(`/opt/venv`, which has PyTorch with CUDA, so a notebook sees the GPU at once), starts it on
+127.0.0.1:8888 with `/workspace` as its folder, and opens a second cloudflared quick tunnel to
+it. The link ends in `?token=...` (kept in `/workspace/jupyter/token.txt`, made once): whoever has
+it has a root shell on the box, so it goes to the owner only. The address is new every time the
+tunnel starts, and the install is repeated on every new box (about a minute), because only
+`/workspace` survives a box. Notebooks kept under `/workspace` stay.
+
 ## Rebuild from nothing
 
 ```
@@ -133,6 +154,7 @@ in pauses off), `AVATAR_SILENCE_MIN_FRAMES` (5), `AVATAR_MEL_REF` (0.6), `AVATAR
 | `make_units.sh` | body-language units: prepares them on the box, builds the browser files on the PC (see below) |
 | `server.py` | the server |
 | `start.sh`, `stop.sh`, `keeper.sh` | run it |
+| `jupyter.sh` | JupyterLab on the box, through its own private link |
 | `test_client.py` | PC-side test: `python test_client.py <tunnel url>` |
 
 ## Added after the first version
