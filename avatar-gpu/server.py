@@ -649,6 +649,10 @@ class Engine:
 
 KEY = load_key()
 ENGINE = None
+# When someone last made her speak. The box bills by the hour whether she speaks or not, so
+# /health reports how long she has been silent ("idle_seconds") and keeper.sh stops everything
+# after AVATAR_IDLE_MINUTES of that; the box then pauses by itself and billing ends.
+LAST_USED = time.time()
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 
@@ -719,8 +723,9 @@ app.add_middleware(KeyGate)
 
 @app.on_event("startup")
 def _startup():
-    global ENGINE
+    global ENGINE, LAST_USED
     ENGINE = Engine()
+    LAST_USED = time.time()          # the idle clock starts when she is ready, not while loading
 
 
 @app.get("/health")
@@ -728,7 +733,8 @@ def health():
     e = ENGINE
     return {"ok": True, "model": MODEL_NAME, "encoder": f"libx264 {X264_PRESET} crf {X264_CRF}, aac-lc 48 kHz mono",
             "clips": [c.info() for c in e.clips.values()], "speed": e.last, "requests": e.count,
-            "gpu_memory": e.gpu_memory(), "uptime_seconds": round(time.time() - e.started)}
+            "gpu_memory": e.gpu_memory(), "uptime_seconds": round(time.time() - e.started),
+            "idle_seconds": round(time.time() - LAST_USED)}
 
 
 def _err(status, msg, **kw):
@@ -760,6 +766,8 @@ def piece(piece_id: str):
 @app.post("/speak")
 async def speak(request: Request, clip: str = "talk", start: int = 0, lead_ms: int = 0, tail_ms: int = 0, audio: int = 1,
                 keep_piece: int = Query(0, alias="keep")):
+    global LAST_USED
+    LAST_USED = time.time()
     e = ENGINE
     c = e.clips.get(clip)
     if c is None:

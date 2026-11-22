@@ -84,7 +84,9 @@ else
 fi
 
 # --- wait for both --------------------------------------------------------------------------------------------
-for i in $(seq 1 240); do
+# A box that has just started reads Python and its packages from cold network storage: the
+# first start can take five minutes or more. Later starts on the same box take seconds.
+for i in $(seq 1 900); do
   healthy && break
   alive server || { say "server stopped while starting; last lines of logs/server.log:"; tail -5 logs/server.log; exit 1; }
   sleep 1

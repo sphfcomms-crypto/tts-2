@@ -38,6 +38,20 @@ POSTs `{"url": "<tunnel url>"}` with the header `x-avatar-key` to every address 
 Nothing has to be installed on a new box: Python, the packages, ffmpeg, cloudflared, the models
 and the prepared clips are all inside `/workspace/avatar-gpu`.
 
+The first start on a box that has just been rented takes about five minutes: Python reads its
+packages from cold network storage. A restart on the same box takes about twenty seconds.
+
+## It stops by itself when nobody uses it
+
+The box bills by the hour (L40S: 71 credits) whether she speaks or not. So the server remembers
+when someone last made her speak (`/health` reports it as `idle_seconds`), and after
+`AVATAR_IDLE_MINUTES` of silence (30; set in `server.env`; 0 = never) `keeper.sh` runs `stop.sh`.
+A box with nothing running pauses by itself ten minutes later, and billing ends. The app then shows
+her in its other forms. To bring the video back, rent a box and run the start line above: the new
+tunnel address is registered with the app by itself.
+
+(`patch_idle.py` made this edit to `server.py` and `keeper.sh`; it is already applied.)
+
 ## Rebuild from nothing
 
 ```
@@ -104,7 +118,7 @@ than 120 s).
 `AVATAR_X264_PRESET` (faster), `AVATAR_X264_CRF` (16), `AVATAR_KBPS` (2500 at 960x720; the cap is
 1.4 times this), `AVATAR_SHARPEN` (0.5), `AVATAR_SILENCE_RMS` (0.003; 0 switches the closed mouth
 in pauses off), `AVATAR_SILENCE_MIN_FRAMES` (5), `AVATAR_MEL_REF` (0.6), `AVATAR_MAX_SECONDS` (120),
-`AVATAR_CUDA_GRAPH` (1), `AVATAR_PORT` (8000).
+`AVATAR_CUDA_GRAPH` (1), `AVATAR_PORT` (8000). Read by `keeper.sh`: `AVATAR_IDLE_MINUTES` (30).
 
 ## Files
 
