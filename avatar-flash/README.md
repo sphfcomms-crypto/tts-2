@@ -92,6 +92,31 @@ those in `FLASH_REGISTER_URLS`. The key is the app's `AVATAR_GPU_KEY` (read from
 Unlike `avatar-gpu` it has no keeper: nothing restarts it, and it does not stop the box when
 nobody calls. Stop it, or the box, by hand.
 
+### On your own GPU
+
+```
+bash home.sh https://<a running copy of the app>      # last line: APP_URL=https://....trycloudflare.com
+bash home.sh --stop
+```
+
+The same thing on a machine of your own, with nothing rented: one NVIDIA card about as fast as an
+RTX 4080 or better with 12 GB or more, on Linux or on Ubuntu under WSL2. Everything goes under
+`~/tts-2-lab` (27 GB; ten minutes the first time). It checks the card, the disk and that the other
+copy of the app answers, then runs `preview.sh` below. The link works from any phone for as long
+as the machine and the program run.
+
+`start.sh` draws her at the largest size this card keeps up with: it starts at 416 pixels, reads
+from `/health` how long one slice takes, and goes down to 384, 352 and 320 while the GPU would be
+busy more than nine tenths of the time (`FLASH_SIZES`, `FLASH_BUSY_MOST`; `FLASH_SIZE` fixes one
+size). `setup.sh` tries flash-attention on the card once and leaves it out where it does not run
+(a card newer than the package): the model then uses PyTorch's own attention.
+
+Several cards help one call only inside one machine (the model can split a pass across them, see
+`inference_script_multi_gpu_pro.sh` in its repository; not set up here). Cards in different
+machines cannot share a call: each pass sends gigabytes between them.
+
+Not run yet on anything but a rented L40S.
+
 ### Trying a branch before it is deployed
 
 ```
@@ -115,7 +140,8 @@ hands out). Anything else is answered 401.
 ### `GET /health`
 
 `{"ok": true, "model": "SoulX-FlashHead pro, 4 steps, TAEHV", "fps": 25, "slice_frames": 28, "look_frames": 0,
-"width": 960, "height": 720, "speed": {...the last slice, milliseconds per stage}, "sessions": n,
+"width": 960, "height": 720, "square": [300, 0, 300], "size": 416, "work_seconds": 0.96,
+"speed": {...the last slice, milliseconds per stage}, "sessions": n,
 "idle_seconds": n}`
 
 ### `POST /say?sid=<session>&seq=<n>`
@@ -182,4 +208,5 @@ box). During a call her hands do not move, and the room is a still picture.
 | `server.py` | the server |
 | `start.sh`, `stop.sh` | run it, with its tunnel, and tell the app |
 | `preview.sh` | run a branch of the app on the box, with the server, behind its own link |
+| `home.sh` | the same on a machine of your own: checks it, then runs `preview.sh` under `~/tts-2-lab` |
 | `test_client.py` | feeds it a recording the way a call does; writes the film and the timings |

@@ -42,9 +42,22 @@ if [ ! -f "$E/deps-ok" ]; then
   grep -v -E "^nvidia-nccl|^gradio|^xfuser" SoulX-FlashHead/requirements.txt > "$E/requirements-lab.txt"
   $UV pip install --python $PY -r "$E/requirements-lab.txt" "xfuser==0.4.3" "huggingface_hub[cli]" soundfile soxr scipy av fastapi uvicorn && touch "$E/deps-ok"
 fi
-$PY -c "import flash_attn" 2>/dev/null || $UV pip install --python $PY \
-  "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.0.post2/flash_attn-2.8.0.post2+cu12torch2.7cxx11abiTRUE-cp310-cp310-linux_x86_64.whl"
-$PY -c "import torch, flash_attn, xformers, xfuser; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
+$PY -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)" \
+  || { echo "PyTorch does not see an NVIDIA GPU here (nvidia-smi must work in this shell; under WSL the driver is installed on Windows)"; exit 1; }
+# flash-attention is a ready-built package and may hold no code for a GPU newer than itself (the
+# RTX 50 series). It is tried on this GPU once; where it does not run it is left out, and the model
+# then uses PyTorch's own attention, which is as fast.
+if [ ! -f "$E/no-flash-attn" ]; then
+  $PY -c "import flash_attn" 2>/dev/null || $UV pip install --python $PY \
+    "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.0.post2/flash_attn-2.8.0.post2+cu12torch2.7cxx11abiTRUE-cp310-cp310-linux_x86_64.whl"
+  $PY - <<'PYEOF' || { echo "flash-attention does not run on this GPU: left out"; $UV pip uninstall --python $PY flash_attn; touch "$E/no-flash-attn"; }
+import torch, flash_attn
+q = torch.randn(1, 64, 4, 32, device="cuda", dtype=torch.float16)
+flash_attn.flash_attn_func(q, q, q)
+torch.cuda.synchronize()
+PYEOF
+fi
+$PY -c "import torch, xformers, xfuser; print('torch', torch.__version__, 'on', torch.cuda.get_device_name(0))"
 
 step "model weights (15 GB)"
 [ -d models/SoulX-FlashHead-1_3B/Model_Lite ] || $E/venv/bin/huggingface-cli download Soul-AILab/SoulX-FlashHead-1_3B --local-dir models/SoulX-FlashHead-1_3B | tail -1

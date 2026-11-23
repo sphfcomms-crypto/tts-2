@@ -36,10 +36,28 @@ T0=$(date +%s); say() { echo "[flash $(( $(date +%s) - T0 ))s] $*"; }
 alive() { local pid; pid="$(cat "run/$1.pid" 2>/dev/null)" && [ -n "$pid" ] && grep -q "$2" "/proc/$pid/cmdline" 2>/dev/null; }
 healthy() { curl -fsS -m 3 -H "x-avatar-key: $KEY" "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; }
 
+# The size the model draws her at decides whether this GPU keeps up with her voice. FLASH_SIZE set:
+# that size. Not set: the largest of FLASH_SIZES at which the GPU is busy at most nine tenths of
+# the time (an L40S is busy 0.86 of the time at 416; smaller is faster and a little less sharp).
+SIZES="${FLASH_SIZE:-${FLASH_SIZES:-416 384 352 320}}"
+busy() {   # the work for one slice as a share of the slice's own length: below 1, faster than her voice
+  curl -fsS -m 3 -H "x-avatar-key: $KEY" "http://127.0.0.1:$PORT/health" 2>/dev/null \
+    | "$E/venv/bin/python" -c "import json,sys; h=json.load(sys.stdin); print(round(h['work_seconds']*h['fps']/h['slice_frames'],2))" 2>/dev/null
+}
 if healthy; then say "server already running"; else
-  say "starting server"
-  setsid nohup "$E/venv/bin/python" "$HERE/server.py" >> logs/flash.log 2>&1 < /dev/null 9>&- &
-  echo $! > run/flash.pid
+  for size in $SIZES; do
+    say "starting server (she is drawn at $size pixels)"
+    FLASH_SIZE="$size" setsid nohup "$E/venv/bin/python" "$HERE/server.py" >> logs/flash.log 2>&1 < /dev/null 9>&- &
+    echo $! > run/flash.pid
+    for i in $(seq 1 300); do healthy && break; alive flash server.py || break; sleep 1; done
+    healthy || { say "server stopped while starting:"; tail -5 logs/flash.log; exit 1; }
+    BUSY="$(busy)"
+    [ "$size" = "${SIZES##* }" ] && break
+    awk "BEGIN{exit !(${BUSY:-9} <= ${FLASH_BUSY_MOST:-0.9})}" && break
+    say "too slow at $size pixels (busy $BUSY of the time): trying smaller"
+    kill "$(cat run/flash.pid)" 2>/dev/null
+    for i in $(seq 1 20); do alive flash server.py || break; sleep 1; done
+  done
 fi
 url() { grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' logs/flash-tunnel.log 2>/dev/null | tail -1; }
 if alive flash-tunnel cloudflared && [ -n "$(url)" ]; then say "tunnel already running"; else
@@ -48,9 +66,10 @@ if alive flash-tunnel cloudflared && [ -n "$(url)" ]; then say "tunnel already r
   setsid nohup bin/cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$PORT" >> logs/flash-tunnel.log 2>&1 < /dev/null 9>&- &
   echo $! > run/flash-tunnel.pid
 fi
-for i in $(seq 1 300); do healthy && break; alive flash server.py || { say "server stopped while starting:"; tail -5 logs/flash.log; exit 1; }; sleep 1; done
 healthy || { say "server did not answer /health, see logs/flash.log"; exit 1; }
-say "server answers /health"
+BUSY="$(busy)"
+say "server answers /health (GPU busy ${BUSY:-?} of the time in a call)"
+awk "BEGIN{exit !(${BUSY:-0} > 1)}" && say "WARNING: this GPU is slower than her voice: the stream will fall behind and the filmed clips will show"
 URL=""; for i in $(seq 1 60); do URL="$(url)"; [ -n "$URL" ] && break; sleep 1; done
 [ -n "$URL" ] || { say "no tunnel address, see logs/flash-tunnel.log"; exit 1; }
 for i in $(seq 1 30); do curl -fsS -m 5 -H "x-avatar-key: $KEY" "$URL/health" >/dev/null 2>&1 && break; sleep 1; done
