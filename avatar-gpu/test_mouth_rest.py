@@ -1,14 +1,54 @@
 """Run from the prepared GPU service directory with venv/bin/python test_mouth_rest.py."""
 import unittest
+import tempfile
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 
-from server import Engine, articulation_timing, silence_gate, source_lip_rest
+from server import Bilabials, Engine, articulation_timing, bilabial_gate, silence_gate, source_lip_rest
 
 
 class MouthRestTest(unittest.TestCase):
+    def test_bilabial_contact_straddles_chunk_boundary(self):
+        # Identical acoustic spike viewed at different offsets inside the context.
+        peak = 5 * 640 + 200
+        full = bilabial_gate([peak], 0, 10)
+        np.testing.assert_allclose(full, [0, 0, 0, .36, .985, .40, 0, 0, 0, 0])
+        np.testing.assert_array_equal(bilabial_gate([peak], 0, 5), full[:5])
+        np.testing.assert_array_equal(bilabial_gate([peak - 3 * 640], 2 * 640, 5), full[5:])
+        self.assertIsNone(bilabial_gate([peak], 10 * 640, 1))
+
+    def test_terminal_or_quiet_audio_needs_no_phone_inference(self):
+        detector = Bilabials.__new__(Bilabials)
+        self.assertIsNone(detector.gate(np.full(639, .4, np.float32), 0, 1))
+        self.assertIsNone(detector.gate(np.full(16_000, .001, np.float32), 0, 25))
+
+    def test_optional_phone_model_can_be_unavailable(self):
+        self.assertIsNone(Bilabials.load("", "cuda"))
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(Bilabials, "__init__", side_effect=OSError("incomplete model")):
+                self.assertIsNone(Bilabials.load(folder, "cuda"))
+
+    def test_optional_model_failure_preserves_the_current_and_later_calls(self):
+        engine = Engine.__new__(Engine)
+        detector = Mock()
+        engine.bilabials = detector
+        detector.gate.side_effect = RuntimeError("device unavailable")
+        job = SimpleNamespace(wav16=None, voice_start=320, n_frames=2, gate=np.array([0.0, 1.0]))
+        self.assertIs(engine.mouth_gate(job), job.gate)
+        self.assertIs(engine.mouth_gate(job), job.gate)
+        detector.gate.assert_called_once_with(None, 320, 2)
+        self.assertIsNone(engine.bilabials)
+
+    def test_contact_preserves_original_pause_strength(self):
+        engine = Engine.__new__(Engine)
+        engine.bilabials = Mock()
+        engine.bilabials.gate.return_value = np.array([0.0, .985, .40])
+        job = SimpleNamespace(wav16=None, voice_start=0, n_frames=3, gate=np.array([1., 0., .5]))
+        np.testing.assert_allclose(engine.mouth_gate(job), [1., .985, .5])
+        np.testing.assert_array_equal(job.gate, [1., 0., .5])
+
     def test_calibration_uses_recorded_context_across_a_chunk_join(self):
         x = np.full(640 * 17, 0.09, np.float32)
         x[640 * 2:640 * 10] = 0

@@ -86,6 +86,28 @@ hf() { "$ROOT/venv/bin/huggingface-cli" download "$@"; }
 [ -f models/musetalkV15/unet.pth ] || hf TMElyralab/MuseTalk musetalkV15/musetalk.json musetalkV15/unet.pth --local-dir models
 [ -f models/sd-vae/diffusion_pytorch_model.bin ] || hf stabilityai/sd-vae-ft-mse config.json diffusion_pytorch_model.bin --local-dir models/sd-vae
 [ -f models/whisper/pytorch_model.bin ] || hf openai/whisper-tiny config.json pytorch_model.bin preprocessor_config.json --local-dir models/whisper
+
+# Wav2Vec2 recognizes the contact in p, b and m on the actual voice waveform.
+# Publish the optional directory only when all three pinned files are complete.
+if [ -z "${AVATAR_PHONE_MODEL+x}" ]; then
+  phone_revision=ae45363bf3413b374fecd9dc8bc1df0e24c3b7f4
+  phone_store="models/speech-phones-$phone_revision"
+  verify_phones() {
+    (cd "$1" && sha256sum --check --status <<'SHA256'
+4609fb49b7e1d28aecb2840da1926c40bd915bc6f1120a940afacf7159bbfb13  config.json
+d732ab2456c0c017930001dc9af0b41b3b93d25b2eb9740bf9d925508d7d87d0  vocab.json
+3173bde9e9ce490fa0f989e413c42f25bc1820c020adc1e6b9b87025b3cfcc5e  pytorch_model.bin
+SHA256
+    )
+  }
+  if ! verify_phones models/speech-phones 2>/dev/null; then
+    if ! { hf facebook/wav2vec2-lv-60-espeak-cv-ft config.json vocab.json pytorch_model.bin \
+        --revision "$phone_revision" --local-dir "$phone_store" && verify_phones "$phone_store" && \
+        ln -sfnT "${phone_store#models/}" models/speech-phones; }; then
+      echo "Could not install the optional phone model. Existing files are preserved." >&2
+    fi
+  fi
+fi
 [ -f models/dwpose/dw-ll_ucoco_384.onnx ] || hf yzd-v/DWPose dw-ll_ucoco_384.onnx --local-dir models/dwpose
 mkdir -p models/face-parse-bisent
 [ -f models/face-parse-bisent/resnet18-5c106cde.pth ] || \

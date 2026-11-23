@@ -21,6 +21,9 @@ The copies of these files on the PC are the source of truth; on the GPU box they
 - **Pauses:** on its own the model leaves the lips slightly parted during pauses. In pauses of
   200 ms or more the server swaps in audio features at which the model closes the mouth
   (`models/closed_mouth.npy`, found by `calibrate_silence.py` in a sample of the app's voice).
+- During speech, an optional local Wav2Vec2 phoneme model recognizes confident *p*, *b* and *m*
+  sounds in the original audio. For these consonants, the renderer uses the calibrated
+  mouth closure for one frame with a short approach and release.
 
 ## Start on a new box
 
@@ -152,6 +155,12 @@ in pauses off), `AVATAR_SILENCE_MIN_FRAMES` (5), `AVATAR_MEL_REF` (0.6), `AVATAR
 40 ms frame of speech when generating the mouth, using the preceding chunk's audio
 when available. The body and output audio retain their original timestamps. Set it to
 0 to use the unadjusted model timing. The maximum is 2 frames.
+
+`setup.sh` downloads the pinned Apache-2.0 `facebook/wav2vec2-lv-60-espeak-cv-ft` model
+(1.26 GB) and verifies its checksums. The server loads `models/speech-phones` locally.
+Set `AVATAR_PHONE_MODEL` to an alternative model directory, or to an empty string to disable
+the refinement. `/health` reports its status in `bilabials`. If the phone model fails to load
+or run, the service continues using its existing speech and pause rendering.
 
 ## Files
 

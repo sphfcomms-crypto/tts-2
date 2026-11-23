@@ -228,6 +228,67 @@ def articulation_timing(wav16, lead16, n_frames, delay_frames):
     return origin // 320, shifted
 
 
+def bilabial_gate(peaks, lead_samples, n_frames):
+    """Map high-confidence acoustic phone peaks to their preceding visible contact."""
+    gates = np.zeros(n_frames, dtype=np.float32)
+    for peak in peaks:
+        # On reference recordings, visible contact typically precedes the acoustic
+        # peak by one 25 fps frame. Round to the nearest output-frame timestamp.
+        center = (int(peak) - lead_samples + 320) // 640 - 1
+        for i, strength in ((center - 1, 0.36), (center, 0.985), (center + 1, 0.40)):
+            if 0 <= i < n_frames:
+                gates[i] = max(gates[i], strength)
+    return gates if gates.any() else None
+
+
+class Bilabials:
+    """Recognize high-confidence two-lip contacts on the renderer's recorded audio."""
+    @classmethod
+    def load(cls, model_dir, device):
+        if not model_dir or not os.path.isdir(model_dir):
+            return None
+        try:
+            return cls(model_dir, device)
+        except Exception as ex:
+            log(event="bilabials_disabled", phase="load", error=str(ex))
+            return None
+
+    def __init__(self, model_dir, device):
+        from transformers import Wav2Vec2ForCTC
+        self.device = device
+        self.model = Wav2Vec2ForCTC.from_pretrained(
+            model_dir, torch_dtype=torch.float16, local_files_only=True,
+        ).eval().to(device)
+        with open(os.path.join(model_dir, "vocab.json")) as f:
+            vocab = json.load(f)
+        self.labels = np.asarray([vocab[key] for key in ("m", "p", "b", "pʰ", "bʰ")])
+
+    @torch.inference_mode()
+    def gate(self, samples, lead, n_frames):
+        if len(samples) < 640 or np.max(np.abs(samples)) < 0.008:
+            return None
+        peaks = []
+        # Bound attention memory on multi-minute direct requests. Short browser
+        # pieces already include context from the preceding and following audio.
+        block, context = 16_000 * 5, 3_200
+        for start in range(0, len(samples), block):
+            end = min(start + block, len(samples))
+            left = max(0, start - context)
+            part = samples[left:min(len(samples), end + context)]
+            if len(part) < 640:
+                continue
+            x = torch.as_tensor(part, device=self.device)
+            x = (x - x.mean()) * torch.rsqrt(x.var(unbiased=False) + 1e-7)
+            probs = self.model(x.to(torch.float16)[None]).logits[0].float().softmax(-1)
+            prob, token = probs.max(-1)
+            keep = (prob.cpu().numpy() >= 0.90) & np.isin(token.cpu().numpy(), self.labels)
+            # Receptive field 400 samples, stride 320; both are independent
+            # of the renderer's video-frame rate.
+            indices = left + np.flatnonzero(keep) * 320 + 200
+            peaks.extend(indices[(indices >= start) & (indices < end)])
+        return bilabial_gate(peaks, lead, n_frames)
+
+
 # ----------------------------------------------------------------------------- clips
 
 def source_lip_rest(landmarks):
@@ -442,6 +503,9 @@ class Engine:
         if os.path.isfile(path) and not os.environ.get("AVATAR_NO_CLOSED_MOUTH"):
             self.closed = torch.from_numpy(np.load(path)).to(self.dev, torch.float16)[None]
 
+        phone_dir = os.environ.get("AVATAR_PHONE_MODEL", os.path.join(MODELS, "speech-phones"))
+        self.bilabials = Bilabials.load(phone_dir, self.dev) if self.closed is not None else None
+
         self.clips = {}
         root = os.path.join(ROOT, "avatars")
         for name in sorted(os.listdir(root)):
@@ -593,6 +657,21 @@ class Engine:
         tm["copy"] = tm.get("copy", 0.0) + (t4 - t3)
         return arr
 
+    def mouth_gate(self, job):
+        if self.bilabials is None:
+            return job.gate
+        try:
+            contact = self.bilabials.gate(job.wav16, job.voice_start, job.n_frames)
+        except Exception as ex:
+            # This refinement is optional. Finish the current request and future
+            # calls with the original renderer even if its extra model fails.
+            self.bilabials = None
+            log(event="bilabials_disabled", phase="inference", error=str(ex))
+            return job.gate
+        if contact is None:
+            return job.gate
+        return contact if job.gate is None else np.maximum(job.gate, contact)
+
     def _gpu_loop(self):
         """All GPU work happens here, one job after the other."""
         while True:
@@ -602,8 +681,9 @@ class Engine:
                 t = time.perf_counter()
                 feats = self.audio_features(job.wav16, job.lead_steps, job.n_frames)
                 rest = None
-                if job.gate is not None:
-                    rest = torch.from_numpy(job.gate).to(self.dev)
+                gate = self.mouth_gate(job)
+                if gate is not None:
+                    rest = torch.from_numpy(gate).to(self.dev)
                     if self.closed is not None:
                         g = rest.to(feats.dtype)[:, None, None]
                         feats = feats + (self.closed - feats) * g
@@ -694,8 +774,8 @@ class Engine:
             pcm48 = np.clip(np.rint(y * 32767.0), -32768, 32767).astype(np.int16)
         lead16 = lead16 // 320 * 320
         lead_steps, gate = articulation_timing(wav16, lead16, int(n_frames), ARTICULATION_DELAY)
-        return Job(clip=clip, start=start % clip.cycle, wav16=wav16, lead_steps=lead_steps, n_frames=int(n_frames),
-                   gate=gate, seconds=seconds, pcm48=pcm48, emit=emit,
+        return Job(clip=clip, start=start % clip.cycle, wav16=wav16, voice_start=lead16, lead_steps=lead_steps,
+                   n_frames=int(n_frames), gate=gate, seconds=seconds, pcm48=pcm48, emit=emit,
                    t_recv=t_recv, lead_ms=lead_ms, warm=warm, stats=None)
 
     def warm_up(self):
@@ -808,7 +888,7 @@ def health():
     e = ENGINE
     return {"ok": True, "model": MODEL_NAME, "encoder": f"libx264 {X264_PRESET} crf {X264_CRF}, aac-lc 48 kHz mono",
             "clips": [c.info() for c in e.clips.values()], "speed": e.last, "requests": e.count,
-            "gpu_memory": e.gpu_memory(), "uptime_seconds": round(time.time() - e.started),
+            "bilabials": e.bilabials is not None, "gpu_memory": e.gpu_memory(), "uptime_seconds": round(time.time() - e.started),
             "idle_seconds": round(time.time() - LAST_USED)}
 
 
