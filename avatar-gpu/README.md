@@ -241,3 +241,32 @@ same pose, so the app can play any one after any other. Each is prepared like `t
   end on the unit's last frame at the latest (`start + frames of the piece <= frames of the unit`);
   the next piece starts at `start=0` on the next unit.
 - The face is smaller than in `talk` (face box about 137 x 170 pixels instead of 235 x 285).
+
+## Preparing the CPU speech atlas
+
+The persistent CPU renderer uses the same source frames as the live MuseTalk renderer. Build the
+atlas on the GPU that holds the prepared frames, with the live model, sharpening, articulation delay
+and calibrated rest settings. Use a private `AVATAR_ROOT` pointing at the same models and at least
+one prepared avatar. The time sheet in `atlas-urdu-phones.json` identifies its 51.29-second mono
+Urdu/Hinglish recording by the SHA-256 of the decoded 24 kHz signed 16-bit PCM.
+
+```bash
+python make_cpu_atlas.py \
+  --staged "$PREPARED_UNITS" --output "$ATLAS_OUTPUT" \
+  --master "$URDU_SPEECH_WAV" --exemplars atlas-urdu-phones.json \
+  --mesh "$FACE_MESH_ONNX" --hold-file "$ATLAS_OUTPUT/pause" --batch 10 \
+  oa1_talk_explain oa1_listen_neutral oa1_talk_ask oa1_talk_warm \
+  oa1_talk_reflect oa1_talk_emphasize oa1_listen_nod oa1_think
+```
+
+The mesh tracker accepts the 478-point `ditto_onnx/face_mesh.onnx` with SHA-256
+`bbbb49fac007b7cde79b478c680d171969f23f53ae6cdaf6a3b4264fa18c8479`.
+The first unit supplies representative frames for picking the best rendering of each confirmed
+acoustic class. The engine then redraws and measures every selected mouth shape on every source
+frame. Touch the hold file to give an active call priority and remove it to resume.
+
+Each completed unit directory contains `patches.npy` (packed Y, U, V in 4:2:0 limited-range
+BT.709), `lips.npy` (12 points in full-frame pixels), and `meta.json` with the crop, phone order,
+source hash and selected acoustic evidence. Only completed units appear at their final path.
+Install those directories inside the CPU service's atlas directory and use the exact matching
+canonical MP4s. Re-run with a fresh output directory when changing the voices, model or units.
