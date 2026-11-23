@@ -3,6 +3,7 @@
 # app can play any one after any other and ask /speak for the mouth on whichever one is playing.
 #
 #   bash make_units.sh prepare [name ...]                on the GPU box: prepare.py for each unit
+#   bash make_units.sh stage DIR SOURCE.mp4 SHA256       stage one immutable browser-ready unit
 #   bash make_units.sh web SRC_DIR OUT_DIR [name ...]    anywhere with ffmpeg (the PC): the files the
 #                                                        browser plays, plus OUT_DIR/../units.json
 #
@@ -35,6 +36,34 @@ pool_of() {
 
 mode="${1:-}"; [ $# -gt 0 ] && shift
 case "$mode" in
+  stage)
+    [ "$#" -eq 3 ] || { echo "stage DIR SOURCE.mp4 SHA256" >&2; exit 2; }
+    ROOT="${AVATAR_ROOT:-/workspace/avatar-gpu}"
+    stage="$1"; src="$2"; digest="$3"; name="$(basename "$src" .mp4)"
+    [[ "$name" =~ ^[a-z][a-z0-9_]{0,39}$ && "$digest" =~ ^[a-f0-9]{64}$ ]] || exit 2
+    mkdir -p "$stage"
+    dir="$(mktemp -d "$stage/.$name.XXXXXX")"
+    trap 'rm -rf "$dir"' EXIT
+    cp "$src" "$dir/$name.mp4"
+    (cd "$dir" && echo "$digest  $name.mp4" | sha256sum -c --status)
+    "$ROOT/bin/ffprobe" -v error -show_packets -show_streams \
+      -show_entries stream=codec_name,pix_fmt,width,height,avg_frame_rate:packet=pts_time -of json "$dir/$name.mp4" | \
+      "$ROOT/venv/bin/python" -c 'import json, sys
+probe = json.load(sys.stdin)
+s = probe["streams"]
+if len(s) != 1 or (s[0]["codec_name"], s[0]["pix_fmt"], s[0]["width"], s[0]["height"], s[0]["avg_frame_rate"]) != ("h264", "yuv420p", 960, 720, "25/1"):
+    sys.exit("Expected one silent H.264 yuv420p 960x720, 25 fps video stream")
+pts = sorted(float(packet["pts_time"]) for packet in probe["packets"])
+if not pts or any(abs(t - i/25) > 0.0001 for i, t in enumerate(pts)):
+    sys.exit("Frame presentation timestamps must start at zero and remain exactly 1/25 second apart")'
+    if [ -e "$stage/$name" ]; then
+      cmp "$dir/$name.mp4" "$stage/$name/$name.mp4"
+      [ -s "$stage/$name/prepared/meta.json" ]
+      exit
+    fi
+    "$ROOT/venv/bin/python" "$ROOT/prepare.py" --clip "$name" --video "$dir/$name.mp4" --out-dir "$dir/prepared"
+    mv -T "$dir" "$stage/$name"
+    ;;
   prepare)
     ROOT="${AVATAR_ROOT:-/workspace/avatar-gpu}"
     cd "$ROOT"

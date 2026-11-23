@@ -13,6 +13,7 @@ Output: /workspace/avatar-gpu/avatars/<clip>/    (meta.json, base.yuv, latents.n
         alpha.npy, theta.npy, boxes.npy, debug/*.jpg)
 """
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -203,6 +204,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--clip", default="talk")
     ap.add_argument("--video", default=None, help="default: clips/<clip>.mp4")
+    ap.add_argument("--out-dir", help="prepare a private clip directory before publishing it")
     ap.add_argument("--size", default=None, help="WxH to resize to (default: keep the clip's size)")
     ap.add_argument("--extra-margin", type=int, default=10, help="pixels added under the chin (MuseTalk 1.5 default)")
     ap.add_argument("--smooth", type=float, default=1.5, help="temporal smoothing of the face box, in frames (0 = off)")
@@ -212,7 +214,7 @@ def main():
     args = ap.parse_args()
 
     video = args.video or os.path.join(ROOT, "clips", f"{args.clip}.mp4")
-    out_dir = os.path.join(ROOT, "avatars", args.clip)
+    out_dir = args.out_dir or os.path.join(ROOT, "avatars", args.clip)
     os.makedirs(os.path.join(out_dir, "debug"), exist_ok=True)
     dev = torch.device("cuda")
     size = tuple(int(v) for v in args.size.lower().split("x")) if args.size else None
@@ -263,11 +265,13 @@ def main():
     np.save(os.path.join(out_dir, "theta.npy"), theta)
     np.save(os.path.join(out_dir, "boxes.npy"), boxes)
     np.save(os.path.join(out_dir, "landmarks.npy"), lm.astype(np.float32))
+    with open(video, "rb") as source:
+        source_hash = hashlib.file_digest(source, "sha256").hexdigest()
     meta = {
         "name": args.clip, "frames": int(n), "fps": FPS, "width": int(w), "height": int(h),
         "cycle": int(2 * n - 2) if n > 1 else 1,
         "window": [int(wx0), int(wy0), int(wx1), int(wy1)],
-        "source": os.path.basename(video), "source_rate": info.get("r_frame_rate"),
+        "source": os.path.basename(video), "source_rate": info.get("r_frame_rate"), "source_sha256": source_hash,
         "colour": "bt709 limited range",
         "extra_margin": args.extra_margin, "smooth": args.smooth, "feather": args.feather,
         "neutral_jaw": bool(args.neutral_jaw),

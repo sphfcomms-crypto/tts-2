@@ -198,6 +198,18 @@ or run, the service continues using its existing speech and pause rendering.
 
 ## Body-language units (`make_units.sh`)
 
+For filmed performance units, give each published take a versioned name such as
+`oa1_talk_explain`. Use the exact same silent 960×720, 25 fps H.264 MP4 for browser playback
+and native preparation. On the GPU, run
+`bash make_units.sh stage RELEASE_DIR SOURCE.mp4 EXPECTED_SHA256`. This checks the
+source bytes and video format, then prepares the unit in a private directory. It leaves
+the running renderer available. Re-running the command accepts an identical finished take.
+
+Each staged unit has its original MP4 and a `prepared/` directory. Verify new speech and
+silence on the prepared frames before linking the directory into `avatars/<name>` and the
+same MP4 into `web/units/<name>.mp4`. Warm the new service with both old and new units before
+registering its tunnel. Existing browser calls can finish through the old tunnel.
+
 Eight short clips (5 s, 121 frames each) of her seated, waist-up, that all start and end in the
 same pose, so the app can play any one after any other. Each is prepared like `talk`, so
 `/speak?clip=<unit>&start=<frame>` draws the mouth on it; `/health` lists them next to `talk` and
