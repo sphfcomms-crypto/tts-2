@@ -1,6 +1,7 @@
 import { withRendererPreference } from "./rendererPreference";
 import { avatarBus, Stage } from "./bus";
 import { CallAudioHandoff } from "./callAudioHandoff";
+import { MotionTurn, motionQuery, motionResult, type MotionPiece, type MotionResult } from "./motion";
 import type { CallGestures } from "./callGestures";
 import { CallVideoHealth } from "./callVideoHealth";
 import { FPS, nudge, stageClock } from "./director";
@@ -233,6 +234,9 @@ export class LiveTalk {
   private lastVoiceAt = -Infinity; // end of the last voiced block on the capture clock
   private interrupted = false; // waiting for the cut-off speaker's track to fall quiet
   private speechRequests = new AbortController();
+  private motion: MotionTurn | null = null;
+  private motionApplied = 0;
+  private motionPassed = 0;
   private generation = 0; // outstanding chunks belong to the turn that requested them
   private pausedUntil = 0; // audio-clock time at which that pause ends
   private lateRun = 0; // pieces in a row that came back too late
@@ -392,6 +396,7 @@ export class LiveTalk {
   interrupt() {
     const context = this.context;
     if (!context || !this.delay || !this.source || !this.gate || this.stopped || !this.hasSpeech) return;
+    this.endMotion();
     // A DelayNode retains every sample already sent to it. Disconnect and
     // replace it so an interrupted word cannot come out on the new turn.
     const old = this.delay;
@@ -437,6 +442,7 @@ export class LiveTalk {
 
   stop() {
     if (this.stopped) return;
+    this.endMotion();
     if ("stream" in this.voice) this.stage.director.liveCall(false);
     this.stopped = true;
     this.finishHandoff?.();
@@ -489,17 +495,32 @@ export class LiveTalk {
       rate: this.context?.sampleRate ?? null,
       failed: this.failed,
       direct: Boolean(avatarBus.direct) && !this.directFailed,
+      motionApplied: this.motionApplied,
+      motionPassed: this.motionPassed,
       talking: this.talking,
       showing: this.showing,
     };
   }
 
+  private endMotion(after?: Promise<void>) {
+    const turn = this.motion;
+    if (!turn) return;
+    this.motion = null;
+    const release = () => {
+      void fetch(`/api/avatar/motion/end?motion=${turn.id}`, { method: "POST", keepalive: true }).catch(() => {});
+    };
+    if (after) void after.then(release, release);
+    else release();
+  }
+
   private async request(
     audio: Int16Array, leadSamples: number, tailSamples: number, clip: string, start: number,
-    signal?: AbortSignal
+    signal?: AbortSignal, motion?: MotionPiece
   ) {
     const leadMs = Math.round((leadSamples / this.rate) * 1000);
     const tailMs = Math.round((tailSamples / this.rate) * 1000);
+    const tag = motionQuery(motion);
+    const body = new Uint8Array(wav(audio, this.rate));
     // Straight to the GPU box when the browser can reach it: the way
     // through the app is slower. A body with no type keeps the browser
     // from asking the box for permission before every chunk.
@@ -507,24 +528,24 @@ export class LiveTalk {
     if (direct) {
       try {
         const res = await fetch(
-          `${direct.url}/speak?clip=${clip}&start=${start}&lead_ms=${leadMs}&tail_ms=${tailMs}&audio=0&t=${direct.token}`,
-          { method: "POST", body: new Blob([new Uint8Array(wav(audio, this.rate))]), signal }
+          `${direct.url}/speak?clip=${clip}&start=${start}&lead_ms=${leadMs}&tail_ms=${tailMs}&audio=0&t=${direct.token}${tag}`,
+          { method: "POST", body: new Blob([body]), signal }
         );
         if (!res.ok) throw new Error(`video chunk failed (${res.status})`);
-        return new Uint8Array(await res.arrayBuffer());
+        return { bytes: new Uint8Array(await res.arrayBuffer()), motion: motionResult(res.headers.get("x-avatar-motion")) };
       } catch (err) {
         if (signal?.aborted) throw err;
         this.directFailed = true;
       }
     }
-    const res = await fetch(withRendererPreference(`/api/avatar/chunk?clip=${clip}&start=${start}&lead=${leadMs}&tail=${tailMs}`), {
+    const res = await fetch(withRendererPreference(`/api/avatar/chunk?clip=${clip}&start=${start}&lead=${leadMs}&tail=${tailMs}${tag}`), {
       method: "POST",
       headers: { "Content-Type": "audio/wav" },
-      body: new Uint8Array(wav(audio, this.rate)),
+      body,
       signal,
     });
     if (!res.ok) throw new Error(`video chunk failed (${res.status})`);
-    return new Uint8Array(await res.arrayBuffer());
+    return { bytes: new Uint8Array(await res.arrayBuffer()), motion: motionResult(res.headers.get("x-avatar-motion")) };
   }
 
   // Silent pieces, sent one chunk apart as speech is, so that they overlap
@@ -654,6 +675,7 @@ export class LiveTalk {
       if (this.pending.length) this.send(this.pending.length);
       this.drawing = false;
     }
+    if (!this.talking) this.endMotion(this.order);
   }
 
   // Sends the first `count` samples of her line to be drawn, on the frames
@@ -730,9 +752,16 @@ export class LiveTalk {
     this.count.asked += 1;
     const asked = performance.now();
     let answered = asked;
-    const answer = this.request(audio, leadSamples, tailSamples, clip, start, this.speechRequests.signal).then((video) => {
+    let motion: MotionPiece | undefined;
+    if ("stream" in this.voice && avatarBus.direct?.audioPose && typeof globalThis.crypto?.randomUUID === "function") {
+      if (!this.motion && this.talking) this.motion = new MotionTurn(segment.audioStart);
+      motion = this.motion?.piece(segment.audioStart);
+    }
+    let effect: MotionResult = null;
+    const answer = this.request(audio, leadSamples, tailSamples, clip, start, this.speechRequests.signal, motion).then((video) => {
       answered = performance.now();
-      return video;
+      effect = motion ? video.motion : null;
+      return video.bytes;
     }).catch(() => null);
     this.order = this.order
       .then(async () => {
@@ -752,6 +781,8 @@ export class LiveTalk {
         if (mediaStart < 0 || generation !== this.generation || this.stopped) return;
         segment.mediaStart = mediaStart;
         this.count.joined += 1;
+        if (effect === "ditto") this.motionApplied++;
+        if (effect === "pass") this.motionPassed++;
         const took = context.currentTime - segment.audioStart;
         if (this.liveHealth?.joined(took - lag)) return this.fail();
         if (took > lag) {
@@ -893,6 +924,7 @@ export class LiveTalk {
 
   private fail() {
     if (this.failed || this.stopped) return;
+    this.endMotion();
     this.failed = true;
     const context = this.context;
     if (!("stream" in this.voice) || !context || !this.delay || !this.gate ||

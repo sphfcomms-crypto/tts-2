@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { motionQuery, motionResult, type MotionPiece, type MotionResult } from "./avatar/motion";
 
 // The link to the GPU box that draws her speaking on video.
 //
@@ -22,7 +23,7 @@ const FILE = path.join(os.tmpdir(), "tts-avatar-gpu.json");
 const ALLOWED_HOST = /^[a-z0-9-]+\.trycloudflare\.com$/;
 
 export type Clip = { name: string; frames: number; fps: number; width: number; height: number };
-export type Health = { ok: boolean; model?: string; clips?: Clip[] };
+export type Health = { ok: boolean; model?: string; clips?: Clip[]; audioPose?: boolean };
 
 let address: string | null = null; // null: not read from disk yet
 const LOCAL_RENDERER = "http://127.0.0.1:8191";
@@ -129,13 +130,13 @@ export async function rendererFor(clip?: string, localOnly = false): Promise<Ren
 // What a browser needs to reach the box itself: its address, and a token
 // the box accepts for the next quarter of an hour. The token is the expiry
 // time signed with the shared secret.
-export function browserAccess(): { url: string; token: string } | null {
+export function browserAccess(audioPose = false): { url: string; token: string; audioPose?: boolean } | null {
   const url = gpuAddress();
   const key = gpuKey();
   if (!url || !key) return null;
   const expires = String(Math.floor(Date.now() / 1000) + 15 * 60);
   const signature = createHmac("sha256", key).update(expires).digest("hex");
-  return { url, token: `${expires}.${signature}` };
+  return { url, token: `${expires}.${signature}`, ...(audioPose && { audioPose: true }) };
 }
 
 // A piece of her speech (a WAV file) in, video of her saying it out, drawn
@@ -153,14 +154,16 @@ export async function renderSpeech(
     tail = 0,
     sound = true,
     signal,
-  }: { clip?: string; lead?: number; tail?: number; sound?: boolean; signal?: AbortSignal } = {}
-): Promise<{ video: Uint8Array; next: number; acoustic: string | null }> {
+    motion,
+  }: { clip?: string; lead?: number; tail?: number; sound?: boolean; signal?: AbortSignal; motion?: MotionPiece } = {}
+): Promise<{ video: Uint8Array; next: number; acoustic: string | null; motion: MotionResult }> {
   const { base } = renderer;
   const query =
     `clip=${clip}&start=${start}` +
     (lead ? `&lead_ms=${lead}` : "") +
     (tail ? `&tail_ms=${tail}` : "") +
-    (sound ? "" : "&audio=0");
+    (sound ? "" : "&audio=0") +
+    motionQuery(renderer.kind === "gpu" && renderer.health.audioPose === true ? motion : undefined);
   const res = await fetch(`${base}/speak?${query}`, {
     method: "POST",
     headers: { "x-avatar-key": gpuKey(), "Content-Type": "audio/wav" },
@@ -175,5 +178,8 @@ export async function renderSpeech(
   }
   const video = new Uint8Array(await res.arrayBuffer());
   const next = Number(res.headers.get("x-next-start"));
-  return { video, next: Number.isFinite(next) ? next : 0, acoustic: res.headers.get("x-avatar-acoustic") };
+  return {
+    video, next: Number.isFinite(next) ? next : 0,
+    acoustic: res.headers.get("x-avatar-acoustic"), motion: motionResult(res.headers.get("x-avatar-motion")),
+  };
 }

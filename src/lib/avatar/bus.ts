@@ -26,7 +26,7 @@ export type Stage = {
 
 // Where the browser can fetch her video itself: the GPU box's address and a
 // pass that is good for a few minutes (renewed by AvatarPanel).
-export type Direct = { url: string; token: string };
+export type Direct = { url: string; token: string; audioPose?: boolean };
 
 type Tap = { analyser: AnalyserNode; release: () => void };
 

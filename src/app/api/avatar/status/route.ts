@@ -15,7 +15,7 @@ export async function GET(request: Request) {
       // The clips of her the box has prepared: her lips can be drawn on these.
       clips: clips.map((clip) => clip.name),
       // Where the browser fetches her video itself, and its pass for now.
-      direct: renderer?.kind === "gpu" ? browserAccess() : null,
+      direct: renderer?.kind === "gpu" ? browserAccess(renderer.health.audioPose === true) : null,
       renderer: renderer?.kind ?? null,
     },
     { headers: { "Cache-Control": "no-store" } }

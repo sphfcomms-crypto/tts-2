@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { readMotionPiece } from "@/lib/avatar/motion";
 import { rendererFor, renderSpeech } from "@/lib/avatarGpu";
 import { overLimit } from "@/lib/usage";
 
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest) {
   if (limited) return limited;
 
   try {
-    const options = { clip, lead, tail, sound: false, signal: req.signal };
+    const options = { clip, lead, tail, sound: false, signal: req.signal, motion: readMotionPiece(searchParams) };
     let rendered;
     try {
       rendered = await renderSpeech(renderer, body, start, options);
@@ -51,13 +52,14 @@ export async function POST(req: NextRequest) {
       renderer = local;
       rendered = await renderSpeech(local, body, start, options);
     }
-    const { video, next, acoustic } = rendered;
+    const { video, next, acoustic, motion } = rendered;
     return new Response(new Uint8Array(video), {
       headers: {
         "Content-Type": "video/mp4",
         "Cache-Control": "no-store, no-transform",
         "X-Next-Start": String(next),
         "X-Avatar-Renderer": renderer.kind,
+        ...(motion && { "X-Avatar-Motion": motion }),
         ...(acoustic ? { "X-Avatar-Acoustic": acoustic } : {}),
       },
     });
