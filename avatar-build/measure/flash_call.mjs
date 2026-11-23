@@ -129,8 +129,10 @@ if (started) {
       const n = Math.round(context.sampleRate * 0.02);
       for (let i = wave.length - n; i < wave.length; i++) power += wave[i] * wave[i];
       pen.drawImage(video, 0, 0, 4, 4);
+      // The filmed clip underneath: the one of the two players that is in front.
+      const front = [...document.querySelectorAll("video")].find((v) => v !== video && v.style.zIndex === "2");
       window.__samples.push([performance.now(), Math.sqrt(power / n), pen.getImageData(1, 1, 1, 1).data[0],
-        Number(getComputedStyle(video).opacity), video.currentTime, flash.delay.delayTime.value]);
+        Number(getComputedStyle(video).opacity), video.currentTime, flash.delay.delayTime.value, front?.dataset.unit ?? ""]);
       requestAnimationFrame(look);
     };
     look();
@@ -185,8 +187,13 @@ for (const s of samples) {
   else if (begun && since === null) since = s[0];
 }
 if (since !== null) gaps.push(Math.round((samples[samples.length - 1][0] - since) / 10) / 100);
+// The filmed clips that played underneath, each with the second it came to the front.
+const clips = [];
+for (const s of samples) {
+  if (s[6] && s[6] !== clips.at(-1)?.[1]) clips.push([Math.round((s[0] - samples[0][0]) / 100) / 10, s[6]]);
+}
 const result = {
-  started, seconds, samples: samples.length,
+  started, seconds, samples: samples.length, clipsUnderneath: clips,
   pictureAgainstSound: best,
   streamOnScreenShare: samples.length ? Math.round(samples.filter((s) => s[3] > 0.5).length / samples.length * 1000) / 1000 : null,
   streamOnScreenWhileSheSpeaks: speaking.length ? Math.round(speaking.filter((s) => s[3] > 0.5).length / speaking.length * 1000) / 1000 : null,

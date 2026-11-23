@@ -1,6 +1,7 @@
 import { avatarBus, type Stage } from "./bus";
-import { FPS, nudge } from "./director";
-import { holdFor, SliceCutter, Timeline, wav16, type Piece } from "./flashSlices";
+import type { CallGestures } from "./callGestures";
+import { FPS, fromFilm, nudge, stageClock } from "./director";
+import { holdFor, SliceCutter, squareMask, Timeline, wav16, type Piece } from "./flashSlices";
 import { Reel } from "./liveTalk";
 
 // Her whole face, drawn new for every picture of a live call.
@@ -23,13 +24,23 @@ import { Reel } from "./liveTalk";
 //     being heard.
 // When a piece is not there in time, or the box stops answering, the
 // filmed clips underneath show instead, and the stream is started again.
+//
+// Her hands: the model draws only the square around her head, and the rest
+// of its frame is a photograph. Where the filmed clips were made from that
+// same photograph, the stream is shown only inside the square (fading out
+// towards its edges) and the clips go on playing underneath it. The
+// director is told of her lines as in the lip video, so her hands gesture
+// while she talks and lie in her lap while she listens.
 
 const DOWN = 3; // her voice is sent at a third of the device's rate (16 kHz)
 const LOUD = 0.006; // RMS above this is her voice
 const MIN_HOLD = 1.1;
 const MAX_HOLD = 4;
 const FADE = 180; // ms: the dissolve between the filmed clip and the stream
+const QUIET = 0.5; // s of silence, as heard, that ends a line: her hands go back to her lap
 const RETRY = [2000, 5000, 10000]; // ms before the stream is tried again
+// The style properties of the mask that shows the stream only inside the square (see squareMask).
+const MASK = ["mask-image", "mask-composite", "mask-size", "mask-repeat"];
 
 export class FlashTalk {
   private context: AudioContext | null = null;
@@ -61,13 +72,20 @@ export class FlashTalk {
   private retries = 0;
   private everShown = false;
   private count = { asked: 0, joined: 0, due: 0, shown: 0, late: 0 };
+  private overClips = false; // the stream shows only her head, over the filmed clips
+  private talking = false; // she is in a line: her body gestures
+  private lines = 0;
 
   // onFail: the stream never produced a picture. The caller then draws her
   // the older way; her voice has not been touched.
+  // gestures: what she is saying, for the kind of gesture that suits it.
+  // greet: she speaks first in this call.
   constructor(
     private stage: Stage,
     private voice: MediaStream,
-    private onFail: () => void
+    private onFail: () => void,
+    private gestures?: CallGestures,
+    private greet = false
   ) {
     const flash = avatarBus.flash;
     if (flash) {
@@ -116,8 +134,52 @@ export class FlashTalk {
     await this.open();
     if (this.stopped) return;
     this.stage.video.style.transition = `opacity ${FADE}ms linear`;
+    this.stage.director.liveCall(true);
+    this.layOverClips();
     this.clock = window.setInterval(() => this.tick(), 40);
     (window as unknown as { __flash?: FlashTalk }).__flash = this;
+  }
+
+  // Shows the stream only inside the square the model draws, over the
+  // filmed clips, when every clip she can be in was made from the picture
+  // the server draws her from. (A clip from any other picture has her
+  // shoulders somewhere else: the whole frame is shown then, as before.)
+  private layOverClips() {
+    const flash = avatarBus.flash;
+    const units = this.stage.director.units;
+    if (!flash?.square || !flash.width || !flash.height || !units.length || !units.every(fromFilm)) return;
+    const mask = squareMask(flash.square, flash.width, flash.height);
+    const style = this.stage.video.style;
+    for (const prefix of ["-webkit-", ""]) {
+      style.setProperty(`${prefix}mask-image`, mask);
+      style.setProperty(`${prefix}mask-composite`, prefix ? "source-in" : "intersect");
+      style.setProperty(`${prefix}mask-size`, "100% 100%");
+      style.setProperty(`${prefix}mask-repeat`, "no-repeat");
+    }
+    this.overClips = true;
+    this.stage.director.overlaid = true;
+  }
+
+  // Her body. The director is told of a line when its first sound is
+  // captured, which is `lag` before it is heard, so that a gesture starts
+  // with her voice; and of what she is saying, for the kind of gesture.
+  private body(context: AudioContext, captured: number, seconds: number, level: number, loud: boolean) {
+    const director = this.stage.director;
+    const seen = captured + this.lag(context) + (stageClock() - context.currentTime);
+    this.gestures?.hear(captured, seconds, level, loud);
+    if (loud && !this.talking) {
+      this.talking = true;
+      const cue = this.gestures?.cue(captured, true, this.greet && this.lines === 0);
+      // Never a line with her hands still: an understated gesture when
+      // nothing is known of the line yet.
+      director.gesture(cue ?? { role: "reflect", clause: -1 - this.lines }, seen);
+      this.lines += 1;
+      director.turn("talk", seen);
+      this.stage.talking(true);
+    } else if (this.talking) {
+      const cue = this.gestures?.cue(captured);
+      if (cue) director.gesture(cue, seen);
+    }
   }
 
   private async open() {
@@ -152,6 +214,10 @@ export class FlashTalk {
     this.nodes = this.nodes.map((node) => (node === old ? delay : node));
     this.timeline.cut(context.currentTime);
     this.lastVoiceAt = -Infinity;
+    // Her hands go back to her lap: she is being spoken to.
+    this.talking = false;
+    this.stage.director.cancelSpeech();
+    this.stage.talking(false);
   }
 
   stop() {
@@ -160,7 +226,14 @@ export class FlashTalk {
     this.requests.abort();
     window.clearInterval(this.clock);
     this.show(false);
+    this.stage.director.liveCall(false);
+    this.stage.director.overlaid = false;
+    this.stage.talking(false);
     this.stage.video.style.transition = "";
+    for (const name of MASK) {
+      this.stage.video.style.removeProperty(name);
+      this.stage.video.style.removeProperty(`-webkit-${name}`);
+    }
     this.reel?.close();
     this.reel = null;
     for (const node of this.nodes) {
@@ -193,6 +266,7 @@ export class FlashTalk {
       failures: this.failures,
       broken: this.broken,
       rate: this.context?.sampleRate ?? null,
+      overClips: this.overClips,
     };
   }
 
@@ -222,7 +296,10 @@ export class FlashTalk {
       sum += (sample / 32768) ** 2;
     }
     if (this.firstAt < 0) this.firstAt = context.currentTime - block.length / context.sampleRate;
-    if (Math.sqrt(sum / Math.max(1, third.length)) > LOUD) this.lastVoiceAt = context.currentTime;
+    const level = Math.sqrt(sum / Math.max(1, third.length));
+    const seconds = block.length / context.sampleRate;
+    if (level > LOUD) this.lastVoiceAt = context.currentTime;
+    this.body(context, context.currentTime - seconds, seconds, level, level > LOUD);
     for (const slice of cutter.push(third)) {
       if (this.broken) continue;
       this.send(slice.seq, slice.samples, this.firstAt + slice.first / this.rate);
@@ -281,6 +358,9 @@ export class FlashTalk {
     this.requests = new AbortController();
     this.timeline = new Timeline();
     this.show(false);
+    // With no head drawn over them, the clips in which her own mouth moves
+    // are not shown as they are.
+    this.stage.director.overlaid = false;
     if (!this.everShown) {
       // It never worked on this device or line: let the caller draw her
       // the older way for this call.
@@ -295,6 +375,7 @@ export class FlashTalk {
       this.open()
         .then(() => {
           this.broken = false;
+          this.stage.director.overlaid = this.overClips;
         })
         .catch(() => {});
     }, wait);
@@ -332,6 +413,12 @@ export class FlashTalk {
     } else {
       this.show(false);
       if (!video.paused) video.pause();
+    }
+
+    // Her line is over once its last sound has been heard.
+    if (this.talking && context.currentTime > this.lastVoiceAt + this.hold + QUIET) {
+      this.talking = false;
+      this.stage.talking(false);
     }
 
     // In her silences, set the delay to what the slices really need. (Not

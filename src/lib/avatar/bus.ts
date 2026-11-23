@@ -37,6 +37,12 @@ export type Flash = {
   lookFrames: number;
   fps: number;
   workSeconds?: number;
+  // The square of the frame the model draws (left, top, size) and the size
+  // of the frame, in the frame's own pixels. Outside it the frame is her
+  // still picture.
+  square?: [number, number, number];
+  width?: number;
+  height?: number;
 };
 
 type Tap = { analyser: AnalyserNode; release: () => void };

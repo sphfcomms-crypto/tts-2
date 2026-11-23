@@ -15,7 +15,16 @@ import { gpuKey } from "./avatarGpu";
 const FILE = path.join(os.tmpdir(), "tts-avatar-flash.json");
 const ALLOWED_HOST = /^[a-z0-9-]+\.trycloudflare\.com$/;
 
-type Health = { ok: boolean; slice_frames?: number; look_frames?: number; fps?: number; work_seconds?: number };
+type Health = {
+  ok: boolean;
+  slice_frames?: number;
+  look_frames?: number;
+  fps?: number;
+  work_seconds?: number;
+  square?: number[];
+  width?: number;
+  height?: number;
+};
 export type FlashAccess = {
   url: string;
   token: string;
@@ -23,6 +32,11 @@ export type FlashAccess = {
   lookFrames: number;
   fps: number;
   workSeconds: number; // what drawing one slice costs the server; 0 when it does not say
+  // The square of the frame the model draws, and the frame's size (absent
+  // when the server does not say: an older one).
+  square?: [number, number, number];
+  width?: number;
+  height?: number;
 };
 
 let address: string | null = null; // null: not read from disk yet
@@ -107,6 +121,12 @@ export async function flashAccess(): Promise<FlashAccess | null> {
   if (!status || !url || !key) return null;
   const expires = String(Math.floor(Date.now() / 1000) + 15 * 60);
   const signature = createHmac("sha256", key).update(expires).digest("hex");
+  const whole = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+  const square = status.square;
+  const placed =
+    Array.isArray(square) && square.length === 3 && square.every(whole) && square[2] > 0 &&
+    whole(status.width) && whole(status.height) &&
+    square[0] + square[2] <= status.width && square[1] + square[2] <= status.height;
   return {
     url,
     token: `${expires}.${signature}`,
@@ -114,5 +134,8 @@ export async function flashAccess(): Promise<FlashAccess | null> {
     lookFrames: status.look_frames ?? 0,
     fps: status.fps!,
     workSeconds: status.work_seconds && status.work_seconds > 0 ? status.work_seconds : 0,
+    ...(placed
+      ? { square: [square[0], square[1], square[2]] as [number, number, number], width: status.width, height: status.height }
+      : {}),
   };
 }

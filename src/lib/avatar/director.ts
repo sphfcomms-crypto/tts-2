@@ -83,6 +83,10 @@ export const stageClock = () => performance.now() / 1000;
 export const nudge = (behind: number) =>
   Math.abs(behind) < 0.012 ? 1 : 1 + Math.max(-0.15, Math.min(0.15, behind * 2));
 
+// The clips filmed from the picture the whole-face server draws her from
+// (the same seat, the same framing): only these fit under a head it draws.
+export const fromFilm = (unit: { name: string }) => unit.name.startsWith("oa1_");
+
 const inPool = (unit: Unit, pool: Pool) =>
   unit.pool === pool || (unit.also?.includes(pool) ?? false);
 const suits = (unit: Unit, want: Want) =>
@@ -124,6 +128,10 @@ export class Director {
   private sequence = 0;
   private film = false;
   private live = false;
+  // Her head is drawn over the clips, new for every picture (the
+  // whole-face stream). A clip in which her own mouth moves can then be
+  // shown as it is: her hands are what is wanted of it.
+  overlaid = false;
   private lately: string[] = []; // the units chosen most recently
 
   // players: two video elements, one on top of the other. One shows the
@@ -414,7 +422,7 @@ export class Director {
     // The actual film utterance is visible only through the GPU layer,
     // with the current voice redrawn on it. During a late or missing piece
     // the lower layer always has a real quiet mouth, including at startup.
-    const unit = planned.mouths && planned.cue
+    const unit = planned.mouths && planned.cue && !this.overlaid
       ? this.units.find(u => u.url && u.name === "oa1_listen_neutral") ??
         this.units.find(u => u.url && u.pool === "listen" && !u.mouths) ?? planned : planned;
     this.players[player].loop = unit !== planned;

@@ -1,7 +1,7 @@
 "use client";
 import React, { useEffect, useRef, useState } from "react";
 import { avatarBus, Mood } from "@/lib/avatar/bus";
-import { Director, DISSOLVE, Unit } from "@/lib/avatar/director";
+import { Director, DISSOLVE, fromFilm, Unit } from "@/lib/avatar/director";
 
 // Her on video, photo-real.
 //
@@ -41,16 +41,23 @@ type Listing = {
 };
 
 // clips: the names the GPU box has prepared; only those can carry her lips.
-// everyClip: no lip renderer is running, but the whole-face server is. All
-// her clips can then play (she sits and listens in them between calls).
+// everyClip: no lip renderer is running, but the whole-face server is. Her
+// clips need no preparing then. Of them, those filmed from the picture
+// that server draws her from are used, and no others: in a call her head
+// is drawn over them, and between calls she then sits in the same seat,
+// so nothing jumps when a call begins.
 async function listUnits(clips: string[], everyClip: boolean): Promise<Unit[]> {
   try {
     const res = await fetch(`${FILES}/units.json`, { cache: "no-store" });
     if (!res.ok) return oneLoop();
     const listing = (await res.json()) as Listing;
-    const units = (listing.units ?? [])
+    let units = (listing.units ?? [])
       .filter((unit) => (everyClip || clips.includes(unit.name)) && unit.frames > 0)
       .map((unit) => ({ ...unit, file: `${FILES}/units/${unit.name}.mp4` }));
+    const film = units.filter(fromFilm);
+    if (everyClip && film.some((unit) => unit.pool === "listen") && film.some((unit) => unit.pool === "talk")) {
+      units = film;
+    }
     return units.some((unit) => unit.pool === "listen") ? units : oneLoop();
   } catch {
     return oneLoop();
@@ -181,7 +188,7 @@ export function VideoAvatar({ clips, everyClip = false }: { clips: string[]; eve
   return (
     <div
       className="relative mx-auto w-full max-w-[720px] aspect-[4/3] mb-10 rounded-lg overflow-hidden shadow-textarea bg-black bg-cover bg-center"
-      style={{ backgroundImage: `url(${FILES}/${clips.includes("oa1_listen_neutral") ? "oa1-poster.jpg" : "poster.jpg"})` }}
+      style={{ backgroundImage: `url(${FILES}/${everyClip || clips.includes("oa1_listen_neutral") ? "oa1-poster.jpg" : "poster.jpg"})` }}
     >
       <video ref={first} className={layer} style={{ zIndex: 2 }} muted playsInline preload="auto" />
       <video ref={second} className={layer} style={{ zIndex: 1 }} muted playsInline preload="auto" />

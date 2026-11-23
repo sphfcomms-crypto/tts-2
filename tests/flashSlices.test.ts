@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { holdFor, SliceCutter, Timeline, wav16 } from "../src/lib/avatar/flashSlices";
+import { holdFor, SliceCutter, squareMask, Timeline, wav16 } from "../src/lib/avatar/flashSlices";
 
 test("her voice is cut into whole slices, in order, with nothing lost or repeated", () => {
   const cutter = new SliceCutter(1000);
@@ -82,4 +82,20 @@ test("her voice is held back for as long as most slices need, within its limits"
   assert.ok(holdFor([2.4, 2.5, 2.6], 0.96, 1.1, 4) > 2.6 + 0.4);
   assert.equal(holdFor([6, 6, 6], 0.96, 1.1, 4), 4);
   assert.equal(holdFor([0.5, 0.5], 0.3, 1.1, 4), 1.1);
+});
+
+test("the stream is shown only inside the square the model draws, fading out towards its edges", () => {
+  // The server's own frame: 960x720, her head and shoulders in the 300 pixels at the top middle.
+  const [across, down] = squareMask([300, 0, 300], 960, 720).split("), ").map((part, i) => (i ? part : part + ")"));
+  assert.equal(
+    across,
+    "linear-gradient(to right, transparent 31.25%, #000 34.06%, #000 59.69%, transparent 62.50%)"
+  );
+  // Nothing fades at the top (the square starts at the frame's edge); the bottom fades over 45 pixels.
+  assert.equal(down, "linear-gradient(to bottom, #000 0.00%, #000 35.42%, transparent 41.67%)");
+});
+
+test("a square away from the frame's top edge fades out upwards too", () => {
+  const mask = squareMask([100, 200, 400], 1000, 1000);
+  assert.ok(mask.includes("to bottom, transparent 20.00%, #000 23.60%, #000 54.00%, transparent 60.00%"));
 });
