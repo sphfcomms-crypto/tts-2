@@ -66,3 +66,28 @@ own voice (made on OpenArt from that recording; a clip takes that model about fo
 In the target her mouth opens about a quarter of a second before each phrase is heard (she breathes
 in and shapes the first sound), her eyes close on most phrase starts, and her whole face moves with
 the words. Measure a recording of a live call the same way to see how far it is from that.
+
+`mouth_compare.py reference.json test.json` prints the same numbers for two tracks side by side
+and how closely one mouth follows the other. `lip_seal.py voice.wav track.json` asks the question
+that matters most for lip sync and can be measured: when the voice says p, b or m, do her lips
+close, and when? It finds those sounds with the phone recognizer the GPU box already has, so it
+runs there. The Seedance clips close her lips on 58 of 58 such sounds, 63 to 100 ms before the
+sound; the whole-face server (`avatar-flash/`) on 49 of 54, 12 to 32 ms before.
+
+## The whole-face call on the real page, without a GPU
+
+    python flash_standin.py voice.wav &        # stands in for avatar-flash/server.py on port 8100
+    AVATAR_GPU_KEY=test AVATAR_FLASH_URL=http://127.0.0.1:8100 npm run dev      # in the project folder
+    node flash_call.mjs out/flash 36           # needs playwright; INTERRUPT_AT=11 cuts her off then
+
+`flash_call.mjs` presses "Call her" on the page. The page's request to start a call is answered
+inside the page by a second peer connection that speaks `voice.wav` as her voice, so the page's
+own call code runs unchanged on a real audio track, with no voice model and no key. The stand-in
+server draws every picture as bright as the slice's sound is loud, so the script can compare the
+brightness on screen with the loudness at the loudspeaker sixty times a second.
+
+On 2026-11-23: 37 of 37 slices joined in order, none late; the picture agrees with the sound best
+at a delay of 0 ms (0.94); the stream is on screen all the time she speaks; her voice is held back
+1.5 s. Cut off mid-sentence, the filmed clip shows for 1.6 s and the stream returns. With the
+stand-in killed for five seconds mid-call, her voice goes on, the filmed clip shows for nine
+seconds, and the stream comes back by itself.

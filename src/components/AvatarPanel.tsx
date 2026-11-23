@@ -51,6 +51,7 @@ export function AvatarPanel() {
   // The file of her photo-real head: null until looked for, "" if absent.
   const [head, setHead] = useState<string | null>(null);
   const told = useRef(false);
+  const [wholeFace, setWholeFace] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -68,6 +69,13 @@ export function AvatarPanel() {
             fetch(`${direct.url}/piece/hello`).catch(() => {});
           }
           avatarBus.setDirect(direct);
+          const flash = status.flash?.url && status.flash?.token && status.flash?.sliceFrames ? status.flash : null;
+          // The same for the whole-face server.
+          if (flash && flash.url !== avatarBus.flash?.url) {
+            fetch(`${flash.url}/health`).catch(() => {});
+          }
+          avatarBus.setFlash(flash);
+          setWholeFace(Boolean(flash));
           const names: string[] = Array.isArray(status.clips) ? status.clips : [];
           setClips(before => {
             if (before.join() === names.join()) return before;
@@ -79,7 +87,9 @@ export function AvatarPanel() {
             }
             return names;
           });
-          const available = Boolean(status.video) && canShowVideo();
+          // The whole-face server draws all of her by itself: the filmed
+          // clips then need no lip renderer to be worth showing.
+          const available = (Boolean(status.video) || Boolean(flash)) && canShowVideo();
           avatarBus.setVideoAvailable(available);
           setVideo(available);
         })
@@ -114,7 +124,7 @@ export function AvatarPanel() {
 
   const local = localCallAvatar || localScriptAvatar;
   if (head === null || (video === null && !local)) return null;
-  if (video && !local) return <VideoAvatar clips={clips} />;
+  if (video && !local) return <VideoAvatar clips={clips} everyClip={wholeFace && clips.length === 0} />;
   return (
     <>
       {head ? <HeadAvatar asset={head} onFail={() => setHead("")} /> : <Avatar />}

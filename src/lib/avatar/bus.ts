@@ -28,6 +28,10 @@ export type Stage = {
 // pass that is good for a few minutes (renewed by AvatarPanel).
 export type Direct = { url: string; token: string; audioPose?: boolean };
 
+// The whole-face server (avatar-flash/server.py), when one is running: its
+// address, a pass like Direct's, and the length of the slices it draws.
+export type Flash = { url: string; token: string; sliceFrames: number; lookFrames: number; fps: number };
+
 type Tap = { analyser: AnalyserNode; release: () => void };
 
 export type SpeechCues = {
@@ -45,6 +49,7 @@ const state = {
   mood: "idle" as Mood,
   stage: null as Stage | null,
   direct: null as Direct | null,
+  flash: null as Flash | null,
 };
 let videoAvailable: boolean | undefined;
 const stageChanges = new Set<() => void>();
@@ -159,6 +164,12 @@ export const avatarBus = {
   },
   get direct() {
     return state.direct;
+  },
+  setFlash: (flash: Flash | null) => {
+    state.flash = flash;
+  },
+  get flash() {
+    return state.flash;
   },
   get voice() {
     return currentVoice()?.analyser ?? null;

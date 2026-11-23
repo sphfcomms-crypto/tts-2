@@ -4,6 +4,7 @@ import { CallTurns, transcriptSpan } from "@/lib/callTurns";
 import { appStore } from "@/lib/store";
 import { avatarBus } from "@/lib/avatar/bus";
 import { CallCueHistory } from "@/lib/avatar/callAudioHandoff";
+import { FlashTalk } from "@/lib/avatar/flashTalk";
 import { canShowVideo, LiveTalk, report, type HeldCallAudio } from "@/lib/avatar/liveTalk";
 
 export type CallStatus = "idle" | "connecting" | "live";
@@ -39,7 +40,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
   // Web Audio taps for the avatar: her voice and the caller's microphone.
   const hearing = useRef<{ context: AudioContext; release: (() => void)[] } | null>(null);
   // Her on video during the call, when the photo-real avatar is on screen.
-  const face = useRef<LiveTalk | null>(null);
+  const face = useRef<LiveTalk | FlashTalk | null>(null);
 
   const cleanup = useCallback(() => {
     active.current = false;
@@ -195,14 +196,36 @@ export function useLiveCall({ onCaption, onError }: Options) {
           };
           if (stage && canShowVideo() && !face.current && !appStore.getState().localCallAvatar) {
             audio.muted = true;
-            const talk = new LiveTalk(stage, { stream: remote, gestures }, switchToLocalAvatar, greet);
-            face.current = talk;
-            if (process.env.NODE_ENV !== "production") {
-              Object.assign(window, { __liveTalk: talk });
+            // Her lips drawn on the filmed clips.
+            const drawLips = () => {
+              const talk = new LiveTalk(stage, { stream: remote, gestures }, switchToLocalAvatar, greet);
+              face.current = talk;
+              if (process.env.NODE_ENV !== "production") {
+                Object.assign(window, { __liveTalk: talk });
+              }
+              talk.start().catch(() => {
+                if (face.current === talk) switchToLocalAvatar();
+              });
+            };
+            if (avatarBus.flash) {
+              // While a whole-face server is running, her head and shoulders
+              // are drawn new for every picture instead. If its stream never
+              // starts on this device, her lips are drawn the other way.
+              const whole: FlashTalk = new FlashTalk(stage, remote, () => {
+                if (!isCurrent() || face.current !== whole) return;
+                face.current = null;
+                drawLips();
+              });
+              face.current = whole;
+              whole.start().catch(() => {
+                if (!isCurrent() || face.current !== whole) return;
+                whole.stop();
+                face.current = null;
+                drawLips();
+              });
+            } else {
+              drawLips();
             }
-            talk.start().catch(() => {
-              if (face.current === talk) switchToLocalAvatar();
-            });
           } else {
             switchToLocalAvatar();
           }

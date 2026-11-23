@@ -41,13 +41,15 @@ type Listing = {
 };
 
 // clips: the names the GPU box has prepared; only those can carry her lips.
-async function listUnits(clips: string[]): Promise<Unit[]> {
+// everyClip: no lip renderer is running, but the whole-face server is. All
+// her clips can then play (she sits and listens in them between calls).
+async function listUnits(clips: string[], everyClip: boolean): Promise<Unit[]> {
   try {
     const res = await fetch(`${FILES}/units.json`, { cache: "no-store" });
     if (!res.ok) return oneLoop();
     const listing = (await res.json()) as Listing;
     const units = (listing.units ?? [])
-      .filter((unit) => clips.includes(unit.name) && unit.frames > 0)
+      .filter((unit) => (everyClip || clips.includes(unit.name)) && unit.frames > 0)
       .map((unit) => ({ ...unit, file: `${FILES}/units/${unit.name}.mp4` }));
     return units.some((unit) => unit.pool === "listen") ? units : oneLoop();
   } catch {
@@ -77,7 +79,7 @@ async function fetchClip(unit: Unit): Promise<Blob> {
 // What she needs first comes first: something to sit and listen in.
 const ORDER: Unit["pool"][] = ["listen", "idle", "think", "talk", "greet"];
 
-export function VideoAvatar({ clips }: { clips: string[] }) {
+export function VideoAvatar({ clips, everyClip = false }: { clips: string[]; everyClip?: boolean }) {
   const talk = useRef<HTMLVideoElement>(null);
   const first = useRef<HTMLVideoElement>(null);
   const second = useRef<HTMLVideoElement>(null);
@@ -105,7 +107,7 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
       if (soft) top.animate([{ opacity: 0 }, { opacity: 1 }], { duration: DISSOLVE, easing: "linear" });
     };
 
-    listUnits(prepared.split(",")).then(async (units) => {
+    listUnits(prepared.split(","), everyClip).then(async (units) => {
       if (gone) return;
       made = new Director(players, units, show, () => avatarBus.phrase);
       // What she is doing at this moment (the effect below only hears of changes).
@@ -161,7 +163,7 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
       }
       urls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [prepared]);
+  }, [prepared, everyClip]);
 
   // What her body does next: a thoughtful look while an answer is being
   // made, otherwise listening. (That she has begun to speak, the lip sync

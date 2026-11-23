@@ -88,6 +88,18 @@ in the same seated pose, so any one can follow any other.
   frame arrived. To assess mouth shapes, teeth or head motion, inspect the
   rendered picture with the spoken line.
 
+**Her whole face drawn live, in a call, while a whole-face server is
+running.** A second program on the GPU box (`avatar-flash/`, SoulX-FlashHead)
+draws her head and shoulders new for every picture from her voice alone:
+lips, teeth, jaw, cheeks, eyes, brows and the movement of her head, the way
+an offline video model does and a lip-only model cannot. The page
+(`src/lib/avatar/flashTalk.ts`) holds her voice back about a second and a
+half, sends it a slice at a time all through the call, and keeps the picture
+on the sound being heard. The filmed clips show between calls and whenever
+the stream is late or down. The target it is measured against is an
+eleven-second Seedance 2.5 clip of her; how close it comes, and where it
+falls short, is in `avatar-flash/README.md`.
+
 **As a photo-real 3D head, when no box is running.** The same woman, made
 from one picture of her by LAM (a model that turns a portrait into a head of
 "Gaussian splats": about twenty thousand soft dots, which is why it looks

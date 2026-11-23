@@ -21,7 +21,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
   // The avatar's GPU box announces itself here with its own secret key.
-  if (req.nextUrl.pathname === "/api/avatar/register") {
+  if (req.nextUrl.pathname === "/api/avatar/register" || req.nextUrl.pathname === "/api/avatar/flash/register") {
     return NextResponse.next();
   }
 
