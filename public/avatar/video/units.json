@@ -122,6 +122,72 @@
    "pool": "think",
    "rise": 27,
    "release": 98
+  },
+  {
+   "name": "oa1_listen_neutral",
+   "frames": 121,
+   "pool": "listen",
+   "also": [
+    "idle"
+   ],
+   "weight": 2
+  },
+  {
+   "name": "oa1_listen_nod",
+   "frames": 121,
+   "pool": "listen"
+  },
+  {
+   "name": "oa1_think",
+   "frames": 121,
+   "pool": "think",
+   "rise": 27,
+   "release": 98
+  },
+  {
+   "name": "oa1_talk_explain",
+   "frames": 134,
+   "pool": "talk",
+   "cue": "explain",
+   "mouths": true,
+   "rise": 7,
+   "release": 96
+  },
+  {
+   "name": "oa1_talk_reflect",
+   "frames": 139,
+   "pool": "talk",
+   "cue": "reflect",
+   "mouths": true,
+   "rise": 6,
+   "release": 118
+  },
+  {
+   "name": "oa1_talk_ask",
+   "frames": 138,
+   "pool": "talk",
+   "cue": "ask",
+   "mouths": true,
+   "rise": 18,
+   "release": 109
+  },
+  {
+   "name": "oa1_talk_warm",
+   "frames": 128,
+   "pool": "talk",
+   "cue": "warm",
+   "mouths": true,
+   "rise": 10,
+   "release": 102
+  },
+  {
+   "name": "oa1_talk_emphasize",
+   "frames": 155,
+   "pool": "talk",
+   "cue": "emphasize",
+   "mouths": true,
+   "rise": 10,
+   "release": 119
   }
  ]
 }
