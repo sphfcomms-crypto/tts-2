@@ -59,6 +59,10 @@ if ! curl -fsS -m 2 -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; then
   TTS_UPSTREAM="$UPSTREAM" AVATAR_GPU_KEY="$KEY" NODE_ENV=production setsid nohup npx next start -p "$PORT" > "$P/app.log" 2>&1 < /dev/null &
   echo $! > "$P/app.pid"
 fi
+mkdir -p "$L/bin"       # on a machine that has never run the video server there is no cloudflared yet
+[ -x "$L/bin/cloudflared" ] || cp /workspace/avatar-gpu/bin/cloudflared "$L/bin/" 2>/dev/null \
+  || { curl -fsSL -o "$L/bin/cloudflared" https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 && chmod +x "$L/bin/cloudflared"; } \
+  || { echo "could not fetch cloudflared"; exit 1; }
 url() { grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$P/tunnel.log" 2>/dev/null | tail -1; }
 if ! { [ -f "$P/tunnel.pid" ] && kill -0 "$(cat "$P/tunnel.pid")" 2>/dev/null && [ -n "$(url)" ]; }; then
   say "starting its link"

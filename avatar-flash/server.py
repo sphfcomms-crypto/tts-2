@@ -465,7 +465,7 @@ def _startup():
 def health():
     e = ENGINE
     return {"ok": True, "model": f"SoulX-FlashHead {MODEL}, {STEPS} steps" + (", TAEHV" if TAE else ""), "fps": FPS, "slice_frames": e.slice, "look_frames": LOOK,
-            "width": OUT_W, "height": OUT_H, "work_seconds": round(e.work, 3), "speed": e.last, "requests": e.count, "sessions": len(e.sessions),
+            "width": OUT_W, "height": OUT_H, "square": [e.ox, e.oy, e.osize], "size": SIZE, "work_seconds": round(e.work, 3), "speed": e.last, "requests": e.count, "sessions": len(e.sessions),
             "uptime_seconds": round(time.time() - e.started), "idle_seconds": round(time.time() - LAST_USED)}
 
 
