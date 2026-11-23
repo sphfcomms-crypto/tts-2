@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { CallTurns } from "../src/lib/callTurns";
 import { CallGestures } from "../src/lib/avatar/callGestures";
 import { Director, stageClock, type Unit } from "../src/lib/avatar/director";
 
@@ -13,6 +14,47 @@ test("real caller worries and step-by-step requests lead distinct reactions befo
   cues.hear(18.5, .05, .06, true);
   assert.deepEqual(cues.cue(18.5, true), { role: "count", clause: 0 });
   assert.equal(cues.cue(19), null);
+});
+
+test("the recorded Urdu interview reply starts with sympathy before its delayed empathy caption", () => {
+  const cues = new CallGestures();
+  const turns = new CallTurns({ update: (text, span) => cues.update(text, span), clear: () => cues.clearCaptions() });
+  // Arrival, role, delta and session start from the real WebRTC call. The
+  // first emphasize clip was previously appended at 14276 ms, before
+  // "سمجھ سکتی" arrived at 14802/14999 ms. The caller's PCM ended at 12155 ms.
+  const events = [
+    [9695, "you", " یار", 6200], [10156, "you", "، انٹ", 6600], [10327, "you", "رویو میں", 6800],
+    [10504, "you", " میرا", 7000], [10903, "you", " دماغ", 7400], [11288, "you", " بالکل", 7800],
+    [11816, "you", " خالی ہو", 8200], [11817, "her", " آہ", 8200], [12000, "you", " گیا", 8400],
+    [12001, "her", "۔", 8400], [12606, "you", " ابھی", 9000], [12808, "you", " تک", 9200],
+    [12946, "you", " برا", 9400], [13225, "you", " لگ", 9600], [13388, "you", " رہا ہے", 9800],
+    [13389, "her", " او", 9800], [13816, "her", " یار", 10200], [14002, "her", "،", 10400],
+  ] as const;
+  for (const [arrival, who, fragment, startMs] of events) {
+    const span = { startMs, endMs: startMs + 200 };
+    if (who === "her") turns.assistant(fragment, span);
+    else if (turns.caller(span, arrival < 12155 + 650)) cues.caller(fragment);
+  }
+  cues.hear(0, .15, .09, true);
+  assert.equal(cues.cue(0, true)?.role, "reflect");
+});
+
+test("acknowledgment alone does not exaggerate emphasis and empathy is explicit in all three scripts", () => {
+  const classify = (line: string, rms = .015) => {
+    const cues = new CallGestures();
+    cues.update(line);
+    cues.hear(0, .2, rms, true);
+    return cues.cue(0, true)?.role;
+  };
+  for (const line of ["Haan, bilkul", "हाँ बिल्कुल", "ہاں بالکل"]) {
+    assert.notEqual(classify(line), "emphasize", line);
+  }
+  for (const line of ["Main samajh sakti hoon", "Main samjh rahi hoon", "میں سمجھ سکتی ہوں", "मैं समझ सकती हूँ"]) {
+    assert.equal(classify(line, .09), "reflect", line);
+  }
+  assert.equal(classify("Bilkul zaroori hai"), "emphasize");
+  assert.equal(classify("क्या सवाल था?"), "ask");
+  assert.equal(classify("पहले जवाब बताओ"), "count");
 });
 
 test("future transcript cannot trigger an action in an earlier voiced clause", () => {

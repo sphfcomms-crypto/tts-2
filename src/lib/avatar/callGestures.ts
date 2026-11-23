@@ -13,8 +13,12 @@ function words(text: string) {
 function meaning(text: string, caller = false): CallGesture | undefined {
   const w = words(text);
   if (/ (?:pehl[aeiy]|pehle|phir|do cheezen|steps?|first|second|پہلے|پہلی|دوسرا|دوسری|پھر|دو چیزیں|पहले|पहली|दूसरा|दूसरी|फिर|दो चीज़ें) /.test(w)) return "count";
+  // A caller can say "my mind went completely blank" before slower
+  // transcript fragments describe how upsetting that felt.
+  if (caller && / (?:dimaa?[gq]h?|دماغ|दिमाग|दिमाग़|दिमाँग) (?:bilk[uo]l |بالکل |बिलकुल |बिल्कुल )?(?:kha+li|خالی|खाली|ख़ाली) /u.test(w)) return "reflect";
+  if (/ (?:sama?jh (?:sakt[iae]|rah[iae])|سمجھ (?:سکتی|سکتا|سکتے|رہی|رہا|رہے)|समझ (?:सकती|सकता|सकते|रही|रहा|रहे)) /u.test(w)) return "reflect";
   if (/ (?:udaas|udas|afsos|afsoos|dukhi|bura lag\p{L}*|khali ho gaya|khaali ho gaya|ghabra\p{L}*|pareshan|fik[ar]+|tension|stress\p{L}*|nervous|upset|worried|افسوس|اداس|دکھ|پریشان|گھبرا\p{L}*|فکر|سمجھ سکتی|برا لگ\p{L}*|उदास|दुखी|बुरा लग[\p{L}\p{M}]*|घबरा[\p{L}\p{M}]*|परेशान|चिंता|फिक्र|फ़िक्र) /u.test(w)) return "reflect";
-  if (/ (?:zaroori|zaruri|sab se aham|bilkul|important|especially|ضروری|اہم|بالکل|خاص بات|ज़रूरी|जरूरी|अहम|बिलकुल|बिल्कुल) /.test(w)) return "emphasize";
+  if (/ (?:zaroori|zaruri|sab se aham|important|especially|ضروری|اہم|خاص بات|ज़रूरी|जरूरी|अहम) /.test(w)) return "emphasize";
   if (/ (?:mubarak|shabash|shukriya|shukria|khushi|great|wonderful|congratulations|thanks|thank you|مبارک|شاباش|شکریہ|خوشی|शुक्रिया|खुशी|ख़ुशी|शाबाश|मुबारक) /.test(w)) return "warm";
   if (/ (?:shayad|shaayad|soch|pata nahi|maybe|perhaps|شاید|سوچ|پتہ نہیں|پتا نہیں|शायद|पता नहीं) /.test(w)) return "reflect";
   if (!caller && /^ (?:assal\p{L}*|salaa?m|hello|hi|ال?سلام|سلام|وعلیکم) /u.test(w)) return "greet";
