@@ -9,7 +9,9 @@ const CSP = [
   // and a clip that is replayed is held in memory too.
   // The avatar's GPU box hands her video to the browser directly, through
   // its own tunnel address (it changes every time the box starts).
-  "connect-src 'self' blob: https://*.trycloudflare.com;",
+  // While developing, a stand-in for the whole-face server can run on this
+  // machine (avatar-build/measure/flash_standin.py).
+  `connect-src 'self' blob: https://*.trycloudflare.com${IS_DEV ? " http://127.0.0.1:* http://localhost:*" : ""};`,
   "media-src 'self' blob:;",
   // Her photo-real 3D head sorts its dots in background workers that the
   // renderer starts from memory.

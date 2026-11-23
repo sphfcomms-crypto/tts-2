@@ -50,9 +50,15 @@ while True:
         p = lambda k: np.array([lm[k].x * pw, lm[k].y * ph]) / scale + (x0, y0)
         eyes = np.linalg.norm(p(263) - p(33))
         d = lambda a, b: float(np.linalg.norm(p(a) - p(b)) / eyes)
+        # How much fine detail (teeth, lip edges) the mouth area holds.
+        mx0, mx1 = int(min(p(61)[0], p(291)[0])), int(max(p(61)[0], p(291)[0]))
+        my0, my1 = int(p(0)[1]), int(p(17)[1])
+        area = frame[max(0, my0):my1 + 1, max(0, mx0):mx1 + 1]
+        sharp = float(cv2.Laplacian(cv2.cvtColor(area, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()) if area.size > 48 else 0.0
         row.update(
             found=True,
             eyes_px=float(eyes),
+            sharp=sharp,
             gap=d(13, 14),            # inner lips apart
             outer=d(0, 17),           # outer lip height
             width=d(61, 291),         # corner to corner
