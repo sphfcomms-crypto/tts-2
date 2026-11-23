@@ -35,7 +35,7 @@ def main():
     arg.add_argument("--masters", type=Path)
     arg.add_argument("--url", help="test the installed authenticated daemon instead of the local renderer")
     arg.add_argument("--key-file", type=Path)
-    arg.add_argument("--threads", type=int, default=2)
+    arg.add_argument("--threads", type=int, default=1)
     arg.add_argument("--runs", type=int, default=16)
     arg.add_argument("--concurrent", type=int, default=1)
     opts = arg.parse_args()

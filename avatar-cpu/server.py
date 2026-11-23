@@ -17,7 +17,7 @@ MAX_BODY = 200_000
 
 
 class Engine:
-    def __init__(self, data, masters, threads=2, workers=2):
+    def __init__(self, data, masters, threads=1, workers=2):
         self.threads = threads
         self.slots = threading.BoundedSemaphore(workers)
         self.model = PhoneModel(data / "models", threads=threads)
@@ -136,7 +136,7 @@ def main():
     key = Path(keyfile).read_bytes().strip() if keyfile else os.environ.get("AVATAR_GPU_KEY", "").encode()
     if not key:
         raise SystemExit("configure the existing avatar relay key")
-    worker = Engine(root, master, threads=int(os.environ.get("AVATAR_CPU_THREADS", "2")),
+    worker = Engine(root, master, threads=int(os.environ.get("AVATAR_CPU_THREADS", "1")),
                     workers=int(os.environ.get("AVATAR_CPU_WORKERS", "2")))
     http = ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("AVATAR_CPU_PORT", "8191"))), Handler)
     http.engine, http.key = worker, key
