@@ -5,8 +5,9 @@ import { browserAccess, rendererFor } from "@/lib/avatarGpu";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const renderer = await rendererFor();
+export async function GET(request: Request) {
+  const cpu = new URL(request.url).searchParams.get("renderer") === "cpu";
+  const renderer = await rendererFor(undefined, cpu);
   const clips = renderer?.health.clips ?? [];
   return Response.json(
     {

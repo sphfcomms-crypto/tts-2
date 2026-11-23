@@ -154,7 +154,7 @@ export async function renderSpeech(
     sound = true,
     signal,
   }: { clip?: string; lead?: number; tail?: number; sound?: boolean; signal?: AbortSignal } = {}
-): Promise<{ video: Uint8Array; next: number }> {
+): Promise<{ video: Uint8Array; next: number; acoustic: string | null }> {
   const { base } = renderer;
   const query =
     `clip=${clip}&start=${start}` +
@@ -175,5 +175,5 @@ export async function renderSpeech(
   }
   const video = new Uint8Array(await res.arrayBuffer());
   const next = Number(res.headers.get("x-next-start"));
-  return { video, next: Number.isFinite(next) ? next : 0 };
+  return { video, next: Number.isFinite(next) ? next : 0, acoustic: res.headers.get("x-avatar-acoustic") };
 }

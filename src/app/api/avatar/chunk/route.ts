@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
   if (body.length < 44 || body.length > MAX_BYTES) {
     return new Response("Bad chunk", { status: 400 });
   }
-  let renderer = await rendererFor(clip);
+  let renderer = await rendererFor(clip, searchParams.get("renderer") === "cpu");
   if (!renderer) {
     return new Response("The avatar video is unavailable.", { status: 503 });
   }
@@ -51,13 +51,14 @@ export async function POST(req: NextRequest) {
       renderer = local;
       rendered = await renderSpeech(local, body, start, options);
     }
-    const { video, next } = rendered;
+    const { video, next, acoustic } = rendered;
     return new Response(new Uint8Array(video), {
       headers: {
         "Content-Type": "video/mp4",
         "Cache-Control": "no-store, no-transform",
         "X-Next-Start": String(next),
         "X-Avatar-Renderer": renderer.kind,
+        ...(acoustic ? { "X-Avatar-Acoustic": acoustic } : {}),
       },
     });
   } catch (err) {

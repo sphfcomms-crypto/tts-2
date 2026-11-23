@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { appStore } from "@/lib/store";
 import { avatarBus } from "@/lib/avatar/bus";
 import { canShowVideo, send } from "@/lib/avatar/liveTalk";
+import { withRendererPreference } from "@/lib/avatar/rendererPreference";
 import { VideoAvatar } from "./VideoAvatar";
 
 // Her, at the top of the page, in the best form that can be shown:
@@ -56,7 +57,7 @@ export function AvatarPanel() {
     avatarBus.setVideoAvailable(undefined);
     findHead().then((found) => alive && setHead(found));
     const check = () =>
-      fetch("/api/avatar/status")
+      fetch(withRendererPreference("/api/avatar/status"))
         .then((res) => (res.ok ? res.json() : { video: false }))
         .then((status) => {
           if (!alive) return;

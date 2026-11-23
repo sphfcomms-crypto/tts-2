@@ -1,3 +1,4 @@
+import { withRendererPreference } from "./rendererPreference";
 import { avatarBus, Stage } from "./bus";
 import { CallAudioHandoff } from "./callAudioHandoff";
 import type { CallGestures } from "./callGestures";
@@ -516,7 +517,7 @@ export class LiveTalk {
         this.directFailed = true;
       }
     }
-    const res = await fetch(`/api/avatar/chunk?clip=${clip}&start=${start}&lead=${leadMs}&tail=${tailMs}`, {
+    const res = await fetch(withRendererPreference(`/api/avatar/chunk?clip=${clip}&start=${start}&lead=${leadMs}&tail=${tailMs}`), {
       method: "POST",
       headers: { "Content-Type": "audio/wav" },
       body: new Uint8Array(wav(audio, this.rate)),

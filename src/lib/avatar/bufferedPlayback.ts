@@ -1,3 +1,4 @@
+import { withRendererPreference } from "./rendererPreference";
 import { avatarBus, type Direct, type Stage } from "./bus";
 import { FPS } from "./director";
 import { getClipTimeline } from "../streamPlayer";
@@ -107,7 +108,7 @@ export async function bufferedMovie(clip: Blob, stage: Stage, signal: AbortSigna
       if (!stage.director.running) throw new Error("Video stage closed");
       const lead = win.lead / (RATE / 1000), tail = win.tail / (RATE / 1000);
       const query = new URLSearchParams({ clip: win.clip, start: String(win.sourceFrame), lead: String(lead), tail: String(tail) });
-      const response = await fetch(`/api/avatar/chunk?${query}`, {
+      const response = await fetch(withRendererPreference(`/api/avatar/chunk?${query}`), {
         method: "POST", headers: { "Content-Type": "audio/wav" },
         body: wav(samples.subarray(win.start - win.lead, win.end + win.tail)),
         signal: AbortSignal.any([drawSignal, AbortSignal.timeout(90000)]),
