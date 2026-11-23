@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Whole-face live server: her voice in, video of her whole head and shoulders out, as it arrives.
 
-Model   SoulX-FlashHead (Lite, 1.3 B parameters, Apache-2.0 code): a streaming video model that
+Model   SoulX-FlashHead (Pro, 1.3 B parameters, Apache-2.0 code): a streaming video model that
         draws a talking portrait from one picture and the sound. Everything in the square around
         her head is drawn new for every picture (lips, teeth, jaw, cheeks, eyes, brows, head
         movement), which is what an offline model such as Seedance does and what a lip-only
@@ -11,9 +11,9 @@ API     GET  /health
         POST /say?sid=<session>&seq=<n>[&t=<token>]    body: WAV, one slice of her voice
         Every request needs the header x-avatar-key or, from a browser, a signed token (the same
         scheme as avatar-gpu/server.py).
-Run     /workspace/tts-2-lab/start-flash.sh   (listens on 127.0.0.1:8100)
+Run     bash start.sh   (listens on 127.0.0.1:8100)
 
-One /say carries exactly one slice of sound (`slice_frames` pictures long, 0.96 s by default) and
+One /say carries exactly one slice of sound (`slice_frames` pictures long, 1.12 s by default) and
 is answered with that many pictures as one silent fragmented MP4. Slices of a session must come in
 order: the model continues her movement from the pictures it drew last. `seq=0` starts her from
 the rest pose.
@@ -48,8 +48,21 @@ from PIL import Image  # noqa: E402
 
 HOST = os.environ.get("FLASH_HOST", "127.0.0.1")
 PORT = int(os.environ.get("FLASH_PORT", "8100"))
-MODEL = os.environ.get("FLASH_MODEL", "lite")
-FRAMES = int(os.environ.get("FLASH_FRAMES", "33"))            # pictures per model pass: 33, 25 or 17
+# pro: sharp, her real face (Wan VAE). lite: several times faster but soft and pale (LTX VAE).
+MODEL = os.environ.get("FLASH_MODEL", "pro")
+# Pictures per model pass. pro: 33, 29, 25, 21 or 17 (5 of them repeat the pass before);
+# lite: 33, 25 or 17 (9 repeat).
+FRAMES = int(os.environ.get("FLASH_FRAMES", "33"))
+# Denoising steps per pass. The model was made for 4. With 2 or 3 it is faster but her lips turn
+# red and the picture gains contrast.
+STEPS = int(os.environ.get("FLASH_STEPS", "4"))
+# The size the model draws its square at (a multiple of 16). It was made for 512. On one L40S pro
+# with 4 steps draws 19 pictures a second at 512 and 32 at 416; a call needs 25. The square is shown
+# at 300 pixels in a 960x720 frame, and at that size 416 and 512 look the same.
+SIZE = int(os.environ.get("FLASH_SIZE", "416" if MODEL == "pro" else "512"))
+# pro only: turn the model's latents into pictures with the small TAEHV decoder instead of the full
+# Wan VAE decoder (0.07 s against 1.26 s for one pass on an L40S).
+TAE = os.environ.get("FLASH_TAE", "1") == "1" and MODEL != "lite"
 # Pictures of sound the model may hear beyond the last picture it draws. Lips are shaped by the
 # sound that follows, and without any of it they close late. Costs that much more delay.
 LOOK = int(os.environ.get("FLASH_LOOK", "0"))
@@ -175,13 +188,18 @@ class Engine:
         self.pipe = inference.get_pipeline(
             world_size=1, ckpt_dir=os.path.join(ROOT, "models", "SoulX-FlashHead-1_3B"),
             wav2vec_dir=os.path.join(ROOT, "models", "wav2vec2-base-960h"), model_type=MODEL)
+        inference.infer_params["sample_steps"] = STEPS
+        inference.infer_params["height"] = inference.infer_params["width"] = SIZE
         self.dev = self.pipe.device
         self.pipe.rank = 1                    # the model's own code prints seven timing lines per slice at rank 0
+        self.colour = None
+        if TAE:
+            self.fast_decoder()
 
         # Her full picture at the size that is sent, and the square of it the model draws.
         full = Image.open(PICTURE).convert("RGB")
         x0, y0, size = BOX
-        square = full.crop((x0, y0, x0 + size, y0 + size)).resize((512, 512), Image.LANCZOS)
+        square = full.crop((x0, y0, x0 + size, y0 + size)).resize((SIZE, SIZE), Image.LANCZOS)
         os.makedirs(os.path.join(ROOT, "run"), exist_ok=True)
         cond = os.path.join(ROOT, "run", "rest-square.png")
         square.save(cond)
@@ -224,9 +242,50 @@ class Engine:
         self.started = time.time()
         self.load_seconds = time.perf_counter() - t0
         self.warm_up()
-        log(event="ready", model=MODEL, frames=FRAMES, slice_frames=self.slice, look_frames=LOOK,
+        log(event="ready", model=MODEL, steps=STEPS, size=SIZE, small_decoder=TAE, frames=FRAMES, slice_frames=self.slice, look_frames=LOOK,
             out=[OUT_W, OUT_H], square=[self.ox, self.oy, self.osize], load_seconds=round(self.load_seconds, 1),
             total_seconds=round(time.perf_counter() - t0, 1))
+
+    # -- the small decoder -------------------------------------------------------------------------------
+    def fast_decoder(self):
+        """Use TAEHV (taew2_1) to turn latents into pictures. Its colours differ a little from the
+        full decoder's (more contrast, redder lips), so warm_up() fits one 3x4 colour matrix that
+        takes its pictures to the full decoder's, and every picture goes through that."""
+        sys.path.insert(0, os.path.join(ROOT, "models", "taehv"))
+        from taehv import TAEHV
+        tae = TAEHV(checkpoint_path=os.path.join(ROOT, "models", "taehv", "taew2_1.pth")).to(self.dev, torch.float16).eval()
+        self.full_decode = self.pipe.vae.decode
+        self.latent = None
+
+        def decode(z):                                                         # (16, T, h, w) -> (1, 3, 4T-3, H, W), -1..1
+            self.latent = z
+            x = tae.decode_video(z.permute(1, 0, 2, 3)[None].to(torch.float16), parallel=True, show_progress_bar=False)
+            x = x.permute(0, 2, 1, 3, 4).float()                               # 0..1
+            if self.colour is not None:
+                m, c = self.colour
+                x = (torch.einsum("ij,bjthw->bithw", m, x) + c[None, :, None, None, None]).clamp_(0, 1)
+            return (x * 2 - 1).to(self.pipe.param_dtype)
+
+        self.tae_decode = decode
+        self.pipe.vae.decode = decode
+
+    @torch.no_grad()
+    def fit_colour(self):
+        """Least squares: full decoder's RGB = M . small decoder's RGB + c, over the pictures of one pass."""
+        z = self.latent
+        want = ((self.full_decode(z).float() + 1) / 2).clamp(0, 1)[0]          # (3, T, H, W)
+        self.colour = None
+        got = ((self.tae_decode(z).float() + 1) / 2)[0]
+        n = min(want.shape[1], got.shape[1])
+        a = got[:, :n, ::4, ::4].reshape(3, -1).T
+        b = want[:, :n, ::4, ::4].reshape(3, -1).T
+        a1 = torch.cat([a, torch.ones_like(a[:, :1])], 1)
+        sol = torch.linalg.lstsq(a1, b).solution                               # (4, 3)
+        self.colour = (sol[:3].T.contiguous(), sol[3].contiguous())
+        before = float((a - b).abs().mean() * 255)
+        after = float((a1 @ sol - b).abs().mean() * 255)
+        log(event="colour_fit", mean_difference_before=round(before, 2), after=round(after, 2),
+            matrix=[[round(float(v), 3) for v in row] for row in sol[:3].T], offset=[round(float(v), 3) for v in sol[3]])
 
     # -- one slice: sound -> pictures -> her full picture -> MP4 ----------------------------------------
     @torch.no_grad()
@@ -245,13 +304,13 @@ class Engine:
 
         t = time.perf_counter()
         self.pipe.latent_motion_frames = session.motion
-        video = self.pipe.generate(emb)                                        # (3, FRAMES, 512, 512), -1..1
+        video = self.pipe.generate(emb)                                        # (3, FRAMES, SIZE, SIZE), -1..1
         session.motion = self.pipe.latent_motion_frames
         torch.cuda.synchronize()
         tm["model"] = time.perf_counter() - t
 
         t = time.perf_counter()
-        new = video[:, self.motion_frames:].permute(1, 0, 2, 3)                # (slice, 3, 512, 512)
+        new = video[:, self.motion_frames:].permute(1, 0, 2, 3)                # (slice, 3, SIZE, SIZE)
         new = ((new + 1) * 127.5).clamp_(0, 255)
         if self.osize != new.shape[-1]:
             new = F.interpolate(new, size=(self.osize, self.osize), mode="bilinear", antialias=True, align_corners=False)
@@ -280,8 +339,10 @@ class Engine:
         is let settle here, in silence, once, and every call begins from that."""
         self.rest = None
         session = Session(self.cached, self.ref_motion)
-        for _ in range(max(1, round(4.0 * FPS / self.slice))):
+        for i in range(max(1, round(4.0 * FPS / self.slice))):
             self.draw(session, np.zeros(self.slice * PER_FRAME, np.float32))
+            if TAE and i == 1:
+                self.fit_colour()
         torch.cuda.synchronize()
         self.rest = (session.motion.clone(), list(session.sound))
 
@@ -398,7 +459,7 @@ def _startup():
 @app.get("/health")
 def health():
     e = ENGINE
-    return {"ok": True, "model": f"SoulX-FlashHead {MODEL}", "fps": FPS, "slice_frames": e.slice, "look_frames": LOOK,
+    return {"ok": True, "model": f"SoulX-FlashHead {MODEL}, {STEPS} steps" + (", TAEHV" if TAE else ""), "fps": FPS, "slice_frames": e.slice, "look_frames": LOOK,
             "width": OUT_W, "height": OUT_H, "speed": e.last, "requests": e.count, "sessions": len(e.sessions),
             "uptime_seconds": round(time.time() - e.started), "idle_seconds": round(time.time() - LAST_USED)}
 

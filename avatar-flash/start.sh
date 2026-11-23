@@ -2,7 +2,11 @@
 # Start the whole-face server and its own public tunnel on a GPU box, and tell the app where it is.
 # Safe to run again; --restart stops both first.
 #
-#   bash /workspace/tts-2-lab/server/start.sh [--restart]
+#   bash start.sh [--restart]        (from wherever this folder is on the box)
+#
+# On a new box this first builds what is missing (setup.sh: about two minutes for Python on the
+# box's own disk, three more the very first time for the model). Her first picture is ready about
+# a minute after that.
 #
 # The app's shared secret is read from FLASH_KEY_FILE (default: the lip-sync box's key.txt, the
 # AVATAR_GPU_KEY value). The tunnel's address is POSTed to <site>/api/avatar/flash/register for every
@@ -11,6 +15,13 @@
 # FLASH_OUT, ...) can be kept in flash.env, one NAME=value per line.
 set -uo pipefail
 L="${FLASH_ROOT:-/workspace/tts-2-lab}"
+E="${FLASH_ENV:-/opt/tts-2-lab}"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# Python lives on the box's own disk, so a new box has none yet: build what is missing first.
+if [ ! -f "$E/deps-ok" ] || [ ! -d "$L/SoulX-FlashHead" ]; then
+  bash "$HERE/setup.sh" > /tmp/flash-setup.log 2>&1 || true
+  [ -f "$E/deps-ok" ] || { echo "setup did not finish, see /tmp/flash-setup.log"; tail -5 /tmp/flash-setup.log; exit 1; }
+fi
 cd "$L" || { echo "missing $L: run setup.sh first"; exit 1; }
 mkdir -p logs run
 if [ -f flash.env ]; then set -a; . ./flash.env; set +a; fi
@@ -20,13 +31,13 @@ export FLASH_KEY_FILE="${FLASH_KEY_FILE:-/workspace/avatar-gpu/key.txt}"
 KEY="$(cat "$FLASH_KEY_FILE")"
 export PATH="$L/bin:$PATH"
 T0=$(date +%s); say() { echo "[flash $(( $(date +%s) - T0 ))s] $*"; }
-[ "${1:-}" = "--restart" ] && bash "$L/server/stop.sh" >/dev/null 2>&1
+[ "${1:-}" = "--restart" ] && bash "$HERE/stop.sh" >/dev/null 2>&1
 alive() { local pid; pid="$(cat "run/$1.pid" 2>/dev/null)" && [ -n "$pid" ] && grep -q "$2" "/proc/$pid/cmdline" 2>/dev/null; }
 healthy() { curl -fsS -m 3 -H "x-avatar-key: $KEY" "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; }
 
 if healthy; then say "server already running"; else
   say "starting server"
-  setsid nohup venv/bin/python server/server.py >> logs/flash.log 2>&1 < /dev/null &
+  setsid nohup "$E/venv/bin/python" "$HERE/server.py" >> logs/flash.log 2>&1 < /dev/null &
   echo $! > run/flash.pid
 fi
 url() { grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' logs/flash-tunnel.log 2>/dev/null | tail -1; }

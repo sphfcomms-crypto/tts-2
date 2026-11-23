@@ -48,6 +48,19 @@ const nextConfig: NextConfig = {
     });
     return config;
   },
+  // TTS_UPSTREAM (set when building): run this copy without an OpenAI key of its own. The routes
+  // that need the key are passed on to another running copy of the app, which holds it; her picture
+  // and everything else are served here. Used for a preview that runs next to the live site.
+  async rewrites() {
+    const upstream = (process.env.TTS_UPSTREAM || "").replace(/\/+$/, "");
+    if (!/^https:\/\/[a-z0-9.-]+$/.test(upstream)) return [];
+    const borrowed = ["call", "generate", "urdu", "transcribe", "transcribe-file", "read-file", "router"];
+    return {
+      beforeFiles: borrowed.map((name) => ({ source: `/api/${name}`, destination: `${upstream}/api/${name}` })),
+      afterFiles: [],
+      fallback: [],
+    };
+  },
   async headers() {
     const headers = [
       {
