@@ -40,6 +40,7 @@ import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 from fastapi import FastAPI, Query, Request  # noqa: E402
 from fastapi.responses import JSONResponse, Response, StreamingResponse  # noqa: E402
+from head_pose import apply_angles, geometry_for  # noqa: E402
 
 ROOT = os.environ.get("AVATAR_ROOT", "/workspace/avatar-gpu")
 MODELS = os.path.join(ROOT, "models")
@@ -308,6 +309,7 @@ class Clip:
         with open(os.path.join(folder, "meta.json")) as f:
             m = json.load(f)
         self.meta = m
+        self.head_geometry = geometry_for(m)
         self.name, self.n, self.w, self.h = m["name"], m["frames"], m["width"], m["height"]
         self.cycle = m["cycle"]
         self.wx0, self.wy0, self.wx1, self.wy1 = m["window"]
@@ -433,16 +435,24 @@ class Mp4Writer:
             self.c.mux(self.apkts[self.ai])
             self.ai += 1
 
-    def video(self, frame_ids, windows):
+    def video(self, frame_ids, windows, pose=None):
         """frame_ids: frames of the clip; windows: their redrawn face windows from Engine.render."""
+        geometry = self.clip.head_geometry
+        warped = 0
+        posed = (geometry is not None and isinstance(pose, np.ndarray) and pose.dtype.kind in "if"
+                 and pose.ndim == 2 and pose.shape[1] == 3 and self.vi + len(frame_ids) <= len(pose))
         for fid, win in zip(frame_ids, windows):
-            vf = av.VideoFrame.from_ndarray(self.clip.compose(fid, win), format="yuv420p")
+            pixels = self.clip.compose(fid, win)
+            if posed:
+                warped += apply_angles(pixels, geometry[fid], pose[self.vi])
+            vf = av.VideoFrame.from_ndarray(pixels, format="yuv420p")
             vf.pts = self.vi
             vf.time_base = Fraction(1, FPS)
             self.vi += 1
             for p in self.v.encode(vf):
                 self.c.mux(p)
         self._audio_until(self.vi * SPF)
+        return warped
 
     def close(self):
         for p in self.v.encode(None):
@@ -711,6 +721,7 @@ class Engine:
             self.jobs.put(job)
             t = time.perf_counter()
             writer = Mp4Writer(job.clip, job.emit, job.pcm48)     # sends the MP4 header straight away
+            job.pose_frames = 0
             t_enc = time.perf_counter() - t
             while True:
                 item = job.frames_q.get()
@@ -721,7 +732,12 @@ class Engine:
                     writer.close()
                     t_enc += time.perf_counter() - t
                     break
-                writer.video(*item)
+                # A live pose can arrive while MuseTalk is drawing this batch.
+                # The encoder never waits for it or delays the original audio.
+                pose = getattr(job, "pose", None)
+                if not isinstance(pose, np.ndarray) or pose.shape != (job.n_frames, 3):
+                    pose = None
+                job.pose_frames += writer.video(*item, pose=pose)
                 t_enc += time.perf_counter() - t
             now = time.perf_counter()
             tm = job.tm
