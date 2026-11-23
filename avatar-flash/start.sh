@@ -17,6 +17,7 @@ set -uo pipefail
 L="${FLASH_ROOT:-/workspace/tts-2-lab}"
 E="${FLASH_ENV:-/opt/tts-2-lab}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+exec 9> /tmp/flash-start.lock; flock 9      # one start at a time: a second one waits, then finds it running
 # Python lives on the box's own disk, so a new box has none yet: build what is missing first.
 if [ ! -f "$E/deps-ok" ] || [ ! -d "$L/SoulX-FlashHead" ]; then
   bash "$HERE/setup.sh" > /tmp/flash-setup.log 2>&1 || true
@@ -37,14 +38,14 @@ healthy() { curl -fsS -m 3 -H "x-avatar-key: $KEY" "http://127.0.0.1:$PORT/healt
 
 if healthy; then say "server already running"; else
   say "starting server"
-  setsid nohup "$E/venv/bin/python" "$HERE/server.py" >> logs/flash.log 2>&1 < /dev/null &
+  setsid nohup "$E/venv/bin/python" "$HERE/server.py" >> logs/flash.log 2>&1 < /dev/null 9>&- &
   echo $! > run/flash.pid
 fi
 url() { grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' logs/flash-tunnel.log 2>/dev/null | tail -1; }
 if alive flash-tunnel cloudflared && [ -n "$(url)" ]; then say "tunnel already running"; else
   say "starting tunnel"
   : > logs/flash-tunnel.log
-  setsid nohup bin/cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$PORT" >> logs/flash-tunnel.log 2>&1 < /dev/null &
+  setsid nohup bin/cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$PORT" >> logs/flash-tunnel.log 2>&1 < /dev/null 9>&- &
   echo $! > run/flash-tunnel.pid
 fi
 for i in $(seq 1 300); do healthy && break; alive flash server.py || { say "server stopped while starting:"; tail -5 logs/flash.log; exit 1; }; sleep 1; done
