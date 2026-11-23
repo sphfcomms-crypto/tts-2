@@ -53,6 +53,7 @@ export function AvatarPanel() {
 
   useEffect(() => {
     let alive = true;
+    avatarBus.setVideoAvailable(undefined);
     findHead().then((found) => alive && setHead(found));
     const check = () =>
       fetch("/api/avatar/status")
@@ -67,14 +68,31 @@ export function AvatarPanel() {
           }
           avatarBus.setDirect(direct);
           const names: string[] = Array.isArray(status.clips) ? status.clips : [];
-          setClips((before) => (before.join() === names.join() ? before : names));
-          setVideo(Boolean(status.video) && canShowVideo());
+          setClips(before => {
+            if (before.join() === names.join()) return before;
+            // A call keeps the same playing elements across a GPU/CPU switch
+            // when both renderers have the film camera already on screen.
+            if (avatarBus.stage?.director.inFilmCall &&
+                before.filter(name => name.startsWith("oa1_")).every(name => names.includes(name))) {
+              return before;
+            }
+            return names;
+          });
+          const available = Boolean(status.video) && canShowVideo();
+          avatarBus.setVideoAvailable(available);
+          setVideo(available);
         })
-        .catch(() => alive && setVideo(false));
+        .catch(() => {
+          if (alive && !avatarBus.stage?.director.inFilmCall) {
+            avatarBus.setVideoAvailable(false);
+            setVideo(false);
+          }
+        });
     check();
     const timer = window.setInterval(check, 30_000);
     return () => {
       alive = false;
+      avatarBus.setVideoAvailable(false);
       window.clearInterval(timer);
     };
   }, []);

@@ -25,7 +25,10 @@ export type Clip = { name: string; frames: number; fps: number; width: number; h
 export type Health = { ok: boolean; model?: string; clips?: Clip[] };
 
 let address: string | null = null; // null: not read from disk yet
-let health: { at: number; value: Health | null } | null = null;
+const LOCAL_RENDERER = "http://127.0.0.1:8191";
+export type Renderer = { base: string; health: Health; kind: "gpu" | "cpu" };
+const healthCache = new Map<string, { at: number; value: Health | null }>();
+const checking = new Map<string, Promise<Health | null>>();
 
 export const gpuKey = () => process.env.AVATAR_GPU_KEY || "";
 
@@ -70,7 +73,7 @@ export function setGpuAddress(url: string): boolean {
   const origin = clean(url);
   if (!origin) return false;
   address = origin;
-  health = null;
+  healthCache.clear();
   try {
     fs.writeFileSync(FILE, JSON.stringify({ url: origin }), { mode: 0o600 });
   } catch (err) {
@@ -79,24 +82,48 @@ export function setGpuAddress(url: string): boolean {
   return true;
 }
 
-// Whether the box answers right now. Asked at most every few seconds.
-export async function gpuHealth(): Promise<Health | null> {
-  const base = gpuAddress();
-  if (!base || !gpuKey()) return null;
-  if (health && Date.now() - health.at < 8000) return health.value;
-  let value: Health | null = null;
-  try {
-    const res = await fetch(`${base}/health`, {
-      headers: { "x-avatar-key": gpuKey() },
-      signal: AbortSignal.timeout(4000),
-    });
-    if (res.ok) {
-      const body = (await res.json()) as Health;
-      value = body.ok ? body : null;
-    }
-  } catch {}
-  health = { at: Date.now(), value };
-  return value;
+// The CPU performer is on the same VPS as Next. The rental can go to
+// sleep without changing the public call URL or the clip/frame numbering.
+function readHealth(base: string): Promise<Health | null> {
+  if (!base || !gpuKey()) return Promise.resolve(null);
+  const cached = healthCache.get(base);
+  if (cached && Date.now() - cached.at < 8000) return Promise.resolve(cached.value);
+  let pending = checking.get(base);
+  if (!pending) {
+    pending = (async () => {
+      let value: Health | null = null;
+      try {
+        const response = await fetch(`${base}/health`, {
+          headers: { "x-avatar-key": gpuKey() },
+          signal: AbortSignal.timeout(base === LOCAL_RENDERER ? 750 : 4000),
+          cache: "no-store",
+        });
+        if (response.ok) {
+          const result: Health = await response.json();
+          if (result.ok && result.clips?.length) value = result;
+        }
+      } catch {}
+      healthCache.set(base, { value, at: Date.now() });
+      checking.delete(base);
+      return value;
+    })();
+    checking.set(base, pending);
+  }
+  // An asleep rental should never block each eighth second of an ongoing
+  // CPU-backed conversation while its tunnel is rechecked.
+  return cached && !cached.value ? Promise.resolve(null) : pending;
+}
+
+export async function rendererFor(clip?: string, localOnly = false): Promise<Renderer | null> {
+  const matches = (status: Health | null) =>
+    status && (!clip || status.clips?.some(unit => unit.name === clip));
+  if (!localOnly) {
+    const base = gpuAddress();
+    const health = await readHealth(base);
+    if (health && matches(health)) return { base, health, kind: "gpu" };
+  }
+  const health = await readHealth(LOCAL_RENDERER);
+  return health && matches(health) ? { base: LOCAL_RENDERER, health, kind: "cpu" } : null;
 }
 
 // What a browser needs to reach the box itself: its address, and a token
@@ -116,7 +143,8 @@ export function browserAccess(): { url: string; token: string } | null {
 // `lead` milliseconds at the start of the WAV are earlier sound, given only
 // as context: they are not drawn. With `sound: false` the video comes back
 // silent (a live call plays her voice itself).
-export async function gpuSpeak(
+export async function renderSpeech(
+  renderer: Renderer,
   wav: Uint8Array,
   start: number,
   {
@@ -127,8 +155,7 @@ export async function gpuSpeak(
     signal,
   }: { clip?: string; lead?: number; tail?: number; sound?: boolean; signal?: AbortSignal } = {}
 ): Promise<{ video: Uint8Array; next: number }> {
-  const base = gpuAddress();
-  if (!base) throw new Error("the avatar GPU is not connected");
+  const { base } = renderer;
   const query =
     `clip=${clip}&start=${start}` +
     (lead ? `&lead_ms=${lead}` : "") +
@@ -143,8 +170,8 @@ export async function gpuSpeak(
       : AbortSignal.timeout(90_000),
   });
   if (!res.ok) {
-    health = null;
-    throw new Error(`the avatar GPU answered ${res.status}`);
+    healthCache.delete(base);
+    throw new Error(`avatar renderer answered ${res.status}`);
   }
   const video = new Uint8Array(await res.arrayBuffer());
   const next = Number(res.headers.get("x-next-start"));

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { gpuHealth, gpuSpeak } from "@/lib/avatarGpu";
+import { rendererFor, renderSpeech } from "@/lib/avatarGpu";
 import { overLimit } from "@/lib/usage";
 
 // One short chunk of her live-call voice in, video of her saying it out.
@@ -32,25 +32,32 @@ export async function POST(req: NextRequest) {
   if (body.length < 44 || body.length > MAX_BYTES) {
     return new Response("Bad chunk", { status: 400 });
   }
-  if (!(await gpuHealth())) {
-    return new Response("The avatar GPU is not running.", { status: 503 });
+  let renderer = await rendererFor(clip);
+  if (!renderer) {
+    return new Response("The avatar video is unavailable.", { status: 503 });
   }
   const limited = overLimit("video", req);
   if (limited) return limited;
 
   try {
-    const { video, next } = await gpuSpeak(body, start, {
-      clip,
-      lead,
-      tail,
-      sound: false,
-      signal: req.signal,
-    });
+    const options = { clip, lead, tail, sound: false, signal: req.signal };
+    let rendered;
+    try {
+      rendered = await renderSpeech(renderer, body, start, options);
+    } catch (error) {
+      if (req.signal.aborted || renderer.kind === "cpu") throw error;
+      const local = await rendererFor(clip, true);
+      if (!local) throw error;
+      renderer = local;
+      rendered = await renderSpeech(local, body, start, options);
+    }
+    const { video, next } = rendered;
     return new Response(new Uint8Array(video), {
       headers: {
         "Content-Type": "video/mp4",
         "Cache-Control": "no-store, no-transform",
         "X-Next-Start": String(next),
+        "X-Avatar-Renderer": renderer.kind,
       },
     });
   } catch (err) {

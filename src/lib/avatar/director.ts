@@ -168,6 +168,10 @@ export class Director {
 
   // A live call uses a single camera family per spoken line. The quiet
   // partner can safely show while a GPU-rendered speech chunk is loading.
+  get inFilmCall() {
+    return this.live && this.filmReady;
+  }
+
   get filmReady() {
     return this.units.some(u => u.url && u.pool === "talk" && u.cue) &&
       this.units.some(u => u.url && u.name === "oa1_listen_neutral");
