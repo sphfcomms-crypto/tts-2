@@ -1,6 +1,9 @@
 """Audio-driven weights for the filmed MuseTalk mouth atlas, at 25 fps."""
 import json
+import logging
 from pathlib import Path
+from threading import BoundedSemaphore, local
+from time import monotonic
 
 import numpy as np
 import onnxruntime as ort
@@ -12,6 +15,8 @@ PHONES = ("REST", "MBP", "FV", "A", "E", "I", "O", "U", "S", "neutral")
 REST, MBP, FV, A, E, I, O, U, S, NEUTRAL = range(len(PHONES))
 FRAME = 640  # original mono 16 kHz samples in a 25 fps frame
 MODEL_FILE = "uni2005-int8.onnx"
+ACCURATE_MODEL = "phoneme-int8.onnx"
+ACCURATE_VOCAB = "phoneme-vocab.json"
 
 
 def _mouth(symbol):
@@ -83,6 +88,75 @@ def _activity(samples, centers):
     return np.clip((rms - .0015) / .0065, 0, 1).astype(np.float32)
 
 
+def _articulation_map(vocab):
+    groups = np.zeros((len(vocab), len(PHONES)), np.float32)
+    for symbol, i in vocab.items():
+        if symbol.startswith("<"):
+            continue
+        shape = _mouth(symbol)
+        if shape == NEUTRAL and symbol[0] in "əɜɞɚɝ":
+            # A schwa has a parted jaw. The neutral atlas is filmed at rest.
+            groups[i, [A, NEUTRAL]] = [.58, .42]
+        elif shape != NEUTRAL:
+            groups[i, shape] = 1
+        # Velars, tongue taps and other internal articulations do not dictate
+        # the lip pose. Their adjacent vowels determine its visible shape.
+    return groups
+
+
+def _project_articulation(groups, centers, activity):
+    """Interpolate sparse 20 ms CTC posteriors onto the picture clock."""
+    stamps = np.arange(len(groups)) * 320 + 200
+    shapes = np.zeros((len(centers), len(PHONES)), np.float32)
+    for shape in range(MBP, NEUTRAL + 1):
+        evidence = groups[:, shape]
+        if not np.any(evidence > .04):
+            continue
+        # The seal anticipates the audible b/p burst or m murmur. An /f/
+        # contact coincides with frication. A vowel continues through the
+        # subsequent CTC blanks and tongue-only consonants.
+        advance, before, after = 0, 480, 480
+        if shape == MBP:
+            advance, before, after = 520, 310, 360
+        elif shape in (A, E, I, O, U, NEUTRAL):
+            before, after = 690, 1310
+        delta = centers[:, None] - (stamps[None, :] - advance)
+        width = np.where(delta < 0, before, after)
+        kernel = np.exp(-.5 * (delta / width) ** 2)
+        shapes[:, shape] = np.max(kernel * evidence, axis=1)
+    # Only the two strongest real poses are morphed by the renderer.
+    shapes[:, NEUTRAL] += .035
+    best = np.argsort(shapes, axis=1)[:, -2:]
+    selected = np.zeros_like(shapes)
+    np.put_along_axis(selected, best, np.take_along_axis(shapes, best, axis=1), axis=1)
+    selected **= 2
+    selected /= selected.sum(axis=1, keepdims=True)
+    # High-confidence release peaks protect the visible seal on just its
+    # nearest frame, even if an adjacent strong vowel is still decaying.
+    activity = activity.copy()
+    for shape in (MBP, FV):
+        anchor = shapes[:, shape]
+        contact = np.where(anchor > .70, np.minimum(.99, anchor + .07), 0)
+        if shape == MBP:
+            for j in np.flatnonzero(groups[:, MBP] >= .78):
+                idx = (stamps[j] - 520 - centers[0] + FRAME // 2) // FRAME
+                if 0 <= idx < len(contact):
+                    contact[idx] = max(contact[idx], min(.99, .24 + .78 * groups[j, MBP]))
+            activity = np.where(activity > 0, np.maximum(activity, contact), activity)
+        old = selected[:, shape]
+        change = contact > old
+        selected[change] *= ((1 - contact[change]) / (1 - old[change]))[:, None]
+        selected[change, shape] = contact[change]
+    # F and S are frequently quiet on a telephone microphone. A recognized
+    # fricative can still sustain its real shape when the PCM has signal.
+    frication = np.maximum(shapes[:, FV], shapes[:, S])
+    activity = np.where((activity > 0) & (frication > .55),
+                        np.maximum(activity, np.minimum(1., frication + .1)), activity)
+    selected *= activity[:, None]
+    selected[:, REST] = 1 - activity
+    return selected
+
+
 class PhoneModel:
     def __init__(self, model_directory, threads=2):
         path = Path(model_directory) / MODEL_FILE
@@ -99,6 +173,32 @@ class PhoneModel:
         self._groups = np.zeros((len(labels), len(PHONES)), np.float32)
         for i, symbol in enumerate(labels[1:], 1):
             self._groups[i, _mouth(symbol)] = 1
+        self._accurate = None
+        self._accurate_slots = BoundedSemaphore(2)
+        self._retry_at = 0.
+        self._request = local()
+        folder = Path(model_directory)
+        if (folder / ACCURATE_MODEL).exists() or (folder / ACCURATE_VOCAB).exists():
+            try:
+                vocab = json.loads((folder / ACCURATE_VOCAB).read_text())
+                if vocab.get("<pad>") != 0 or sorted(vocab.values()) != list(range(392)):
+                    raise ValueError("unexpected eSpeak IPA inventory")
+                session = ort.InferenceSession(str(folder / ACCURATE_MODEL), sess_options=options,
+                                               providers=["CPUExecutionProvider"])
+                if session.get_outputs()[0].shape[-1] != len(vocab):
+                    raise ValueError("model and IPA inventory differ")
+                self._accurate_groups = _articulation_map(vocab)
+                self._accurate = session
+            except Exception:
+                logging.exception("could not load Wav2Vec2, using uni2005")
+
+    @property
+    def backend(self):
+        return "wav2vec2+uni2005" if self._accurate is not None else "uni2005"
+
+    @property
+    def last_backend(self):
+        return getattr(self._request, "backend", "rest")
 
     def weights(self, samples16k_float32, lead_samples, n_frames):
         """The first output is for [lead_samples, lead_samples + 640).
@@ -113,6 +213,7 @@ class PhoneModel:
             raise ValueError("non-finite PCM")
         out = np.zeros((n_frames, len(PHONES)), np.float32)
         out[:, REST] = 1
+        self._request.backend = "rest"
         if n_frames == 0 or not len(pcm) or np.max(np.abs(pcm)) < .0015:
             return out
 
@@ -134,6 +235,25 @@ class PhoneModel:
         weights[:, REST] = 1
         if not np.any(activity):
             return weights
+        if (len(samples) >= 400 and self._accurate is not None and monotonic() >= self._retry_at
+                and self._accurate_slots.acquire(blocking=False)):
+            try:
+                # Wav2Vec2 feature stride is 320 samples and the receptive
+                # field is 400. Preserve the user's real 200/100 ms context.
+                audio = (samples - samples.mean()) / np.sqrt(samples.var() + 1e-7)
+                logits = self._accurate.run(None, {"input_values": audio[None, :]})[0][0]
+                posterior = np.exp(logits - logits.max(axis=1, keepdims=True))
+                posterior /= posterior.sum(axis=1, keepdims=True)
+                projected = _project_articulation(posterior @ self._accurate_groups, centers, activity)
+                if self.last_backend == "rest":
+                    self._request.backend = "wav2vec2+uni2005"
+                return projected
+            except Exception:
+                self._retry_at = monotonic() + 15
+                logging.exception("Wav2Vec2 inference failed, using uni2005")
+            finally:
+                self._accurate_slots.release()
+        self._request.backend = "uni2005"
         # The trained recognizer sees one stacked window every 30 ms.
         # Run the three 10 ms phases so a very short b/p release cannot
         # disappear just because it is on the edge of the nominal stride.
