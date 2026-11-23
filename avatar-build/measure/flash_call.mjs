@@ -34,9 +34,12 @@ const browser = await chromium.launch({
     "--allow-loopback-in-peer-connection", "--disable-features=WebRtcHideLocalIpsWithMdns",
     ...(process.env.MIC ? [`--use-file-for-fake-audio-capture=${process.env.MIC}`] : [])],
 });
+// VIEW=390x844: the page as a phone shows it (touch, two device pixels to one).
+const [width, height] = (process.env.VIEW || "880x1300").split("x").map(Number);
 const context = await browser.newContext({
-  viewport: { width: 880, height: 1300 },
-  ...(process.env.RECORD === "1" ? { recordVideo: { dir: out, size: { width: 880, height: 1300 } } } : {}),
+  viewport: { width, height },
+  ...(process.env.VIEW ? { deviceScaleFactor: 2, isMobile: true, hasTouch: true } : {}),
+  ...(process.env.RECORD === "1" ? { recordVideo: { dir: out, size: { width, height } } } : {}),
 });
 await context.grantPermissions(["microphone"], { origin: new URL(SITE).origin });
 const page = await context.newPage();

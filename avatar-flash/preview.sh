@@ -20,7 +20,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="${PREVIEW_REPO:-https://github.com/sphfcomms-crypto/tts-2}"
 PORT="${PREVIEW_PORT:-3190}"
 mkdir -p "$P" "$L/logs"
-stop() { local pid; pid="$(cat "$P/$1.pid" 2>/dev/null)"; [ -n "$pid" ] && kill "$pid" 2>/dev/null; rm -f "$P/$1.pid"; }
+# Each part is started as the leader of its own process group, and is stopped as a group: the
+# app's real process is a child of the one whose number is kept.
+stop() { local pid; pid="$(cat "$P/$1.pid" 2>/dev/null)"; [ -n "$pid" ] && { kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null; }; rm -f "$P/$1.pid"; }
 if [ "${1:-}" = "--stop" ]; then stop app; stop tunnel; echo "preview stopped"; exit 0; fi
 BRANCH="${1:-feature/urdu-hinglish-avatar-sync}"
 T0=$(date +%s); say() { echo "[preview $(( $(date +%s) - T0 ))s] $*"; }
