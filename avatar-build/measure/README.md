@@ -86,6 +86,14 @@ own call code runs unchanged on a real audio track, with no voice model and no k
 server draws every picture as bright as the slice's sound is loud, so the script can compare the
 brightness on screen with the loudness at the loudspeaker sixty times a second.
 
+    python flash_standin.py voice.wav --film film.mp4 --delay 0.9 &     # her real drawn face, replayed
+
+With `--film` the stand-in answers each slice with the pictures a real run of the server made of
+that same recording (`avatar-flash/test_client.py` writes such a film; `voice.wav` is its sound):
+her first picture while she is silent, the film from its start at the first sound of a line. The
+page then shows what it shows in a real call, and a film of it (`RECORD=1`) can be looked at.
+`flash_call.mjs` also lists the filmed clips that played underneath (`clipsUnderneath`).
+
 On 2026-11-23: 37 of 37 slices joined in order, none late; the picture agrees with the sound best
 at a delay of 0 ms (0.94); the stream is on screen all the time she speaks; her voice is held back
 1.5 s. Cut off mid-sentence, the filmed clip shows for 1.6 s and the stream returns. With the

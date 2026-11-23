@@ -54,8 +54,9 @@ else on that GPU while it runs (`avatar-gpu` on the same GPU would make her late
 
 By eye, next to the Seedance clips of the same lines: her own face and skin, sharp eyes and teeth,
 lips that round and close on the sound, blinks and small movements of her head. What Seedance
-has and this has not: her hands and shoulders do not move (they are the photograph), and the
-pictures are drawn at 416 pixels, not 1248.
+has and this has not: the pictures are drawn at 416 pixels, not 1248, and below her collar the
+frame the server sends is the photograph. In the app her body comes from the filmed clips
+instead (see "In the app"), so her hands and shoulders do move there.
 
 Settings that were tried and are worse:
 
@@ -177,6 +178,15 @@ heard. Between calls, and whenever a slice is late or the server stops answering
 clips show; the stream is started again after 2, 5 and 10 seconds. If it never produces a picture
 in a call, her lips are drawn the older way. The Play button still uses the lip video.
 
+**Her body.** The server draws only the square around her head; the rest of its frame is the
+photograph. The `oa1_` clips were filmed from that same photograph, so where only those are in
+use (no lip renderer is running: `everyClip`) the page shows the stream only inside the square,
+fading out towards its edges (a CSS mask made from the `square` the server reports), and the
+clips go on playing underneath. The director is told of her lines as in the lip video: a gesture
+clip starts with her voice and her hands go back to her lap when she stops or is cut off. Between
+calls she sits in the same clips, so nothing jumps when a call begins. With clips of any other
+picture in use, the whole frame is shown as before.
+
 Checked on the real page, built and served on the GPU box by `preview.sh`, against this server
 (`avatar-build/measure/flash_call.mjs`, 2026-11-23):
 
@@ -194,11 +204,26 @@ Seen in the films of those calls: her own face, sharp, lips and jaw on the words
 stream and a filmed clip change places there is a cross-fade of a few pictures in which both
 show (the clip is sharper and has more contrast, and her head sits a little differently).
 
+Those calls showed the server's whole frame. With her head laid over the clips (checked without
+a GPU: `flash_standin.py --film` answers each slice with the pictures a real run of this server
+made of the same recording, so the page shows her real drawn face):
+
+- a clip of her listening plays until her line, `oa1_talk_warm` comes to the front 0.2 s before
+  her voice is heard and gesture clips follow one another until 0.5 s after her last sound, then
+  she sits and listens again; the stream is on screen all the time she speaks, none late;
+- cut off in the middle of a line, the clip underneath changes to her listening and the stream
+  is away for 2.6 s: her body does not change, only her face is the filmed one for that long;
+- in the films, no join shows at her collar or around her hair in any picture looked at.
+
+Of the five gesture clips only two move her hands much (`explain`, `emphasize`); in the others,
+as in the Seedance clip, they stay in her lap. Which one plays is the director's choice from
+what she says, as in the lip video.
+
 Checked earlier without a GPU, with `flash_standin.py`: when the server dies mid-call her voice
 goes on and the stream returns by itself once the server is back.
 
-Not yet done: a call from a real phone, and a deployed site (the preview lives as long as the
-box). During a call her hands do not move, and the room is a still picture.
+Not yet done: a call from a real phone, a deployed site (the preview lives as long as the
+box), and a call with her head over the clips against the real server on a GPU.
 
 ## Files
 

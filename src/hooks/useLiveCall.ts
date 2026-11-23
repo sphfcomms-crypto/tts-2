@@ -215,7 +215,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
                 if (!isCurrent() || face.current !== whole) return;
                 face.current = null;
                 drawLips();
-              });
+              }, gestures, greet);
               face.current = whole;
               whole.start().catch(() => {
                 if (!isCurrent() || face.current !== whole) return;

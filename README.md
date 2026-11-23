@@ -95,10 +95,12 @@ lips, teeth, jaw, cheeks, eyes, brows and the movement of her head, the way
 an offline video model does and a lip-only model cannot. The page
 (`src/lib/avatar/flashTalk.ts`) holds her voice back about two and a half
 seconds, sends it a slice at a time all through the call, and keeps the
-picture on the sound being heard. The filmed clips show between calls and whenever
-the stream is late or down. The target it is measured against is an
-eleven-second Seedance 2.5 clip of her; how close it comes, and where it
-falls short, is in `avatar-flash/README.md`.
+picture on the sound being heard. Her body comes from the filmed clips: the
+stream is shown only inside the square around her head and the clips play
+underneath, so her hands gesture while she talks. The filmed clips alone show
+between calls and whenever the stream is late or down. The target it is
+measured against is an eleven-second Seedance 2.5 clip of her; how close it
+comes, and where it falls short, is in `avatar-flash/README.md`.
 
 **As a photo-real 3D head, when no box is running.** The same woman, made
 from one picture of her by LAM (a model that turns a portrait into a head of

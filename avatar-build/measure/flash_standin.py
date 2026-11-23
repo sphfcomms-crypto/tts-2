@@ -7,6 +7,13 @@ It answers /health and /say like the real server, but its pictures are plain gre
 is as bright as the slice's sound is loud during that picture. A recording of the page can then
 check, without judging any face, that the picture on screen belongs to the sound being heard.
 It also serves the voice file at /voice.wav for flash_call.mjs to play as "her" voice.
+
+    python flash_standin.py <voice.wav> --film <film.mp4> [--square 300,0,300]
+
+With --film its pictures are a film the real server made of that same voice file (test_client.py
+writes one): from the first sound of a line on, each slice is answered with the next pictures of
+the film, and silence with the film's first picture. What the page then shows is what it shows in
+a real call, face and all, and can be looked at.
 """
 import http.server
 import json
@@ -23,6 +30,41 @@ PORT, DELAY = int(opt("--port", "8100")), float(opt("--delay", "0.35"))
 FRAMES, FPS, W, H = 24, 25, 320, 240
 FULL = 0.12          # the loudness (RMS) drawn as white
 stats = {"slices": 0, "last_seq": -1, "out_of_order": 0}
+
+FILM = opt("--film", "")
+film, at = None, -1          # the film's pictures, and the next one to show (-1: she is silent)
+if FILM:
+    FRAMES, W, H = 28, 960, 720          # the real server's slice and frame
+    SQUARE = [int(v) for v in opt("--square", "300,0,300").split(",")]
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", FILM, "-vf", f"fps={FPS},scale={W}:{H}", "-pix_fmt", "yuv420p",
+                          "-f", "rawvideo", "-"], stdout=subprocess.PIPE, check=True).stdout
+    film = np.frombuffer(raw, np.uint8).reshape(-1, W * H * 3 // 2)
+
+
+def encode(frames):
+    return subprocess.run(
+        ["ffmpeg", "-v", "error", "-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
+         "-c:v", "libx264", "-preset", "ultrafast", "-profile:v", "main", "-bf", "0", "-g", "25", "-pix_fmt", "yuv420p",
+         "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "-"],
+        input=bytes(frames), stdout=subprocess.PIPE, check=True).stdout
+
+
+def film_piece(x):
+    """The film's pictures for this slice of sound: its first picture while she is silent, and
+    the film from its beginning at the first sound of a line."""
+    global at
+    per = len(x) / FRAMES
+    frames = bytearray()
+    for k in range(FRAMES):
+        part = x[int(k * per):int((k + 1) * per)]
+        if at < 0 and len(part) and float(np.abs(part).max()) > 0.02:
+            at = 0
+        frames += film[max(0, at)].tobytes()
+        if at >= 0:
+            at += 1
+            if at >= len(film):
+                at = -1          # the line is over: the next one starts the film again
+    return encode(frames)
 
 
 def samples(body):
@@ -46,11 +88,7 @@ def piece(x):
         part = x[int(k * per):int((k + 1) * per)]
         level = min(1.0, float(np.sqrt((part ** 2).mean())) / FULL) if len(part) else 0.0
         frames += bytes([16 + round(219 * level)]) * (W * H) + bytes([128]) * (W * H // 2)
-    return subprocess.run(
-        ["ffmpeg", "-v", "error", "-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
-         "-c:v", "libx264", "-preset", "ultrafast", "-profile:v", "main", "-bf", "0", "-g", "25", "-pix_fmt", "yuv420p",
-         "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "-"],
-        input=bytes(frames), stdout=subprocess.PIPE, check=True).stdout
+    return encode(frames)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -68,7 +106,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/health"):
             body = {"ok": True, "model": "stand-in", "fps": FPS, "slice_frames": FRAMES, "look_frames": 0,
-                    "width": W, "height": H, **stats}
+                    "width": W, "height": H, "work_seconds": DELAY, **({"square": SQUARE} if FILM else {}), **stats}
             return self.answer(200, json.dumps(body).encode(), "application/json")
         if self.path.startswith("/voice.wav"):
             return self.answer(200, open(voice, "rb").read(), "audio/wav")
@@ -85,7 +123,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         stats["last_seq"] = seq
         stats["slices"] += 1
         x, _ = samples(self.rfile.read(int(self.headers["Content-Length"])))
-        data = piece(x)
+        if film is not None and seq == 0:
+            globals()["at"] = -1
+        data = film_piece(x) if film is not None else piece(x)
         time.sleep(max(0.0, DELAY - (time.time() - began)))
         self.answer(200, data, "video/mp4")
 
@@ -93,4 +133,5 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+Server = http.server.HTTPServer if FILM else http.server.ThreadingHTTPServer   # a film is handed out in order
+Server(("127.0.0.1", PORT), Handler).serve_forever()

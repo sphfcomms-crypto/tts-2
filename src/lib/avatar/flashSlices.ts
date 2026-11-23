@@ -119,3 +119,26 @@ export function holdFor(took: number[], slice: number, least: number, most: numb
   const margin = Math.max(0.15, 0.3 * (usual - slice));
   return Math.min(most, Math.max(least, usual + margin));
 }
+
+// How far the stream fades out inside the edges of the square the model
+// draws, as a share of the square: enough to hide the join at her collar
+// when her shoulders move in the clip underneath, and little enough to keep
+// all of her hair.
+const FADE_SIDE = 0.09;
+const FADE_BOTTOM = 0.15;
+
+// A CSS mask that shows a frame only inside that square, with soft edges:
+// two gradients, one across and one down, of which the overlap is kept.
+// square: left, top and size; width, height: the frame; all in its pixels.
+export function squareMask([x, y, size]: [number, number, number], width: number, height: number) {
+  const at = (value: number, whole: number) => `${((100 * value) / whole).toFixed(2)}%`;
+  const side = FADE_SIDE * size;
+  const top = y > 0 ? FADE_SIDE * size : 0; // a square at the frame's top edge has nothing above it to fade into
+  const across =
+    `linear-gradient(to right, transparent ${at(x, width)}, #000 ${at(x + side, width)}, ` +
+    `#000 ${at(x + size - side, width)}, transparent ${at(x + size, width)})`;
+  const down =
+    `linear-gradient(to bottom, ${top ? `transparent ${at(y, height)}, ` : ""}#000 ${at(y + top, height)}, ` +
+    `#000 ${at(y + size - FADE_BOTTOM * size, height)}, transparent ${at(y + size, height)})`;
+  return `${across}, ${down}`;
+}
