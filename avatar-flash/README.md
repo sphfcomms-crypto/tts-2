@@ -151,14 +151,28 @@ heard. Between calls, and whenever a slice is late or the server stops answering
 clips show; the stream is started again after 2, 5 and 10 seconds. If it never produces a picture
 in a call, her lips are drawn the older way. The Play button still uses the lip video.
 
-Checked on the real page without the voice model and without a GPU
-(`avatar-build/measure/flash_call.mjs` with `flash_standin.py`): 37 of 37 slices joined in order,
-none late, the picture on the sound at 0 ms, the stream on screen all the time she speaks; when
-she is cut off the filmed clip shows for 1.6 s; when the server dies mid-call her voice goes on
-and the stream returns by itself once the server is back.
+Checked on the real page, built and served on the GPU box by `preview.sh`, against this server
+(`avatar-build/measure/flash_call.mjs`, 2026-11-23):
 
-Not yet done: a real call against this server from a phone, and a deployed site. During a call
-her hands do not move, and the room is a still picture.
+- **Her voice played by a second peer in the page** (the reference line, twice), as a desktop and
+  as a phone-sized page: the stream is on screen from 2.7 s after "Call her" and all the time she
+  speaks, 27 of 28 slices joined when the call was ended, none late, no failures, her voice held
+  back 2.5 s.
+- **A real call** (the voice model, through the live site's `/api/call`; the caller is a
+  recording): she answers in Urdu, 52 of 53 slices joined, none late, no failures.
+- **When the caller talks over her**, what she had not yet been heard to say is dropped and the
+  filmed clip shows until the sound from then on is due, about 2.6 s each time. A caller who
+  never stops (the recording talks for 26 s) kept the clip on screen for 17 s.
+
+Seen in the films of those calls: her own face, sharp, lips and jaw on the words. Where the
+stream and a filmed clip change places there is a cross-fade of a few pictures in which both
+show (the clip is sharper and has more contrast, and her head sits a little differently).
+
+Checked earlier without a GPU, with `flash_standin.py`: when the server dies mid-call her voice
+goes on and the stream returns by itself once the server is back.
+
+Not yet done: a call from a real phone, and a deployed site (the preview lives as long as the
+box). During a call her hands do not move, and the room is a still picture.
 
 ## Files
 
