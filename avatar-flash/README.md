@@ -11,81 +11,100 @@ run inside a call. This one keeps up with her voice on one rented GPU.
 
 ## What it is
 
-- **Model:** SoulX-FlashHead, the Lite variant (github.com/Soul-AILab/SoulX-FlashHead; code
-  Apache-2.0; the Lite variant's LTX video VAE is under Open-RAIL-M). A streaming video model of
-  1.3 billion parameters: from one picture of her and the sound, four denoising steps per pass
-  give 33 pictures of 512x512, of which the first 9 repeat the end of the pass before, so her
-  movement continues from one pass to the next.
+- **Model:** SoulX-FlashHead, the Pro variant (github.com/Soul-AILab/SoulX-FlashHead, code
+  Apache-2.0), with the Wan 2.1 video VAE. A streaming video model of 1.3 billion parameters: from
+  one picture of her and the sound, four denoising steps per pass give 33 pictures, of which the
+  first 5 repeat the end of the pass before, so her movement continues from one pass to the next.
+- **Made fast enough for a call** in two ways, neither of which changes what she looks like at
+  the size she is shown:
+  - the square is drawn at 416 pixels instead of 512 (`FLASH_SIZE`). It is shown 300 pixels wide
+    in the 960x720 frame.
+  - the model's latents are turned into pictures by TAEHV (`taew2_1`, github.com/madebyollin/taehv,
+    MIT), a decoder of 22 MB, instead of the full Wan decoder: 0.07 s a pass against 1.26 s. Its
+    colours are fitted to the full decoder's once at start (a 3x4 matrix; what is left differs by
+    1 part in 255).
 - **Her picture:** one still, 4:3, mouth closed (`inputs/start.jpg`, 1664x1248). The model draws
   the 520x520 square around her head and shoulders (`FLASH_BOX`). The server lays that square back
   into the still with soft edges, so the room, her hands and the armchair are the photograph, and
   sends whole frames of 960x720.
-- **One slice at a time:** her voice arrives in slices of 24 pictures (0.96 s). Each is answered
+- **One slice at a time:** her voice arrives in slices of 28 pictures (1.12 s). Each is answered
   with exactly those pictures as one silent fragmented MP4 (H.264, no B-frames, BT.709, the same
   settings as `avatar-gpu`, so the browser joins them the same way).
 - **Silence:** a hiss far below hearing is mixed into what the model hears (never into what is
   played). With exact digital silence its sound features lose their scale and her lips stay
-  parted: 0.065 of the distance between her eyes, against 0.003 with the hiss. And every call
-  begins from a pose she has already settled into for four seconds: started from the still
-  alone, she opened her mouth for the first two seconds of a call.
+  parted. And every call begins from a pose she has already settled into for four seconds:
+  started from the still alone, she opened her mouth for the first two seconds of a call.
 
-## Measured (L40S, 2026-11-23)
+## Measured (one L40S, 2026-11-23)
 
-Fed three recordings of the app's voice in real time, a slice at a time, the way a call does
-(`test_client.py`), 70 slices in all:
+Fed recordings of the app's voice in real time, a slice at a time, the way a call does
+(`test_client.py`):
 
 | | |
 |---|---|
-| work per 0.96 s slice | 0.33 s (sound 11 ms, model 252 ms, laying into her picture 8 ms, H.264 60 ms) |
-| first sound of a slice spoken to its pictures being back | 1.30 s every time (worst 1.31 s) on the box itself; about 0.3 s more through the tunnel |
-| size | 73 kB/s (590 kbit/s) at 960x720 |
-| GPU memory | 5 GB; ready about 20 s after start |
+| speed | 32 pictures a second (a call needs 25): 0.96 s of work for each 1.12 s slice |
+| first sound of a slice spoken to its pictures being back | 2.08 s on the box itself |
+| her voice is held back in the browser by | 2.45 s (through the tunnel) |
+| size | about 930 kbit/s at 960x720 |
+| lips fully closed on p, b and m | 8 of 8 and 24 of 24 (two lines; Seedance: 58 of 58 on three) |
+| four minutes without a pause | no drift, no artefacts, lips closed in every silence |
 
-Against the Seedance clips of the same three lines (`avatar-build/measure/`):
+The GPU is busy 86% of the time during a call, so **one call at a time** on an L40S, and nothing
+else on that GPU while it runs (`avatar-gpu` on the same GPU would make her late).
 
-| | Seedance 2.5 | this server |
-|---|---|---|
-| lips fully closed on p, b and m | 58 of 58 | 49 of 54 (8/8, 17/22 and 24/24 by line) |
-| her lips close before the sound by | 63 to 100 ms | 12 to 32 ms |
-| lips apart, 95th percentile | 0.214 | 0.214 |
-| mouth width, 5th to 95th percentile | 0.31 to 0.61 | 0.46 to 0.66 |
-| blinks in 11 s | 9 | 8 |
-| head movement (share of the frame, across and down) | 0.018, 0.036 | 0.016, 0.040 |
-| fine detail in the mouth area (same scale) | 22.7 | 25.5 |
-| in 15 s of silence | | lips closed (0.003), 9 blinks, head almost still |
+By eye, next to the Seedance clips of the same lines: her own face and skin, sharp eyes and teeth,
+lips that round and close on the sound, blinks and small movements of her head. What Seedance
+has and this has not: her hands and shoulders do not move (they are the photograph), and the
+pictures are drawn at 416 pixels, not 1248.
 
-So: the same opening of the mouth, the same amount of head movement and blinking, and as sharp;
-her lips round less than in the Seedance clips, and in fast speech about one p/b/m in ten is not
-fully closed. These are measurements. Watch the two side by side before deciding it is good
-enough: nobody has yet judged it by eye on a phone in a real call.
+Settings that were tried and are worse:
 
-Other settings that were tried and are worse:
-
-- Shorter passes (`FLASH_FRAMES=25` or `17`: slices of 0.64 or 0.32 s, so less delay): the mouth
-  area loses detail (21.3 and 13.9 against 25.5), her head wanders more, and with 17 her lips
-  close about 130 ms later.
+- **The Lite variant** (`FLASH_MODEL=lite`): three times faster (91 pictures a second, slices of
+  0.96 s, her voice held back 1.5 s), and by the numbers as good (mouth opening, blinks, head
+  movement, lips closed on 49 of 54). By eye it is not: soft, pale, her eyes half closed.
+- **Fewer steps** (`FLASH_STEPS=2` or `3`): her lips turn red and the picture gains contrast.
+- **Shorter passes with Pro** (`FLASH_FRAMES=25`, slices of 0.8 s): coloured dots appear, and
+  after about 25 seconds her face falls apart. 33 is the only length that held.
+- **As the model is shipped** (`FLASH_TAE=0 FLASH_SIZE=512`): 10.5 pictures a second. With the
+  small decoder at 512: 19. A call needs 25.
 - Letting the model hear ahead (`FLASH_LOOK`), and making the voice louder (`FLASH_GAIN`): no
   gain in closed lips.
-- The Pro variant draws 10.5 pictures a second on this GPU. A call needs 25.
 
 ## Build and start
 
 ```
-bash setup.sh                     # once per storage: about four minutes, 25 GB under /workspace/tts-2-lab
-# copy server.py, test_client.py, start.sh, stop.sh to /workspace/tts-2-lab/server/
-bash /workspace/tts-2-lab/server/start.sh       # last line: FLASH_URL=https://....trycloudflare.com
-bash /workspace/tts-2-lab/server/stop.sh
+# copy this folder to the box (anywhere; /workspace/tts-2-lab/server/ survives a stop), then:
+bash start.sh            # last line: FLASH_URL=https://....trycloudflare.com
+bash stop.sh
 ```
 
-`start.sh` starts the server on 127.0.0.1:8100 and its own cloudflared tunnel, waits for
-`/health`, and POSTs `{"url": "<tunnel url>"}` with the header `x-avatar-key` to
-`<site>/api/avatar/flash/register` for every site the lip-sync box registers with
-(`/workspace/avatar-gpu/register_urls.txt`) or those in `FLASH_REGISTER_URLS`. The key is the
-app's `AVATAR_GPU_KEY` (read from `/workspace/avatar-gpu/key.txt`; `FLASH_KEY_FILE` names another
-file). It shares the box with `avatar-gpu` and touches nothing of it.
+`start.sh` builds what is missing first (`setup.sh`): the model and its weights once, on the
+persistent storage (`/workspace/tts-2-lab`, 17 GB, about three minutes), and Python with its
+packages on every new box, on the box's own disk (`/opt/tts-2-lab`, 8 GB, about two minutes; kept
+on the persistent storage, the first import on a new box took more than ten minutes). It then
+starts the server on 127.0.0.1:8100 and its own cloudflared tunnel, waits for `/health`, and POSTs
+`{"url": "<tunnel url>"}` with the header `x-avatar-key` to `<site>/api/avatar/flash/register`
+for every site the lip-sync box registers with (`/workspace/avatar-gpu/register_urls.txt`) or
+those in `FLASH_REGISTER_URLS`. The key is the app's `AVATAR_GPU_KEY` (read from
+`/workspace/avatar-gpu/key.txt`; `FLASH_KEY_FILE` names another file). It touches nothing of
+`avatar-gpu`.
 
 Unlike `avatar-gpu` it has no keeper: nothing restarts it, and it does not stop the box when
 nobody calls. Stop it, or the box, by hand.
+
+### Trying a branch before it is deployed
+
+```
+bash preview.sh [branch]      # last line: APP_URL=https://....trycloudflare.com
+bash preview.sh --stop
+```
+
+Builds and runs the app itself on the GPU box (its own disk, `/opt/tts-2-preview`), behind its own
+link, and starts the video server for it. The page, her clips and the whole-face video come from
+the box. The routes that need the OpenAI key (the call, Play, transcripts) are passed on to a copy
+of the app that has it (`PREVIEW_UPSTREAM`, or else the first site in `register_urls.txt`; see
+`TTS_UPSTREAM` in `next.config.ts`), so no key is put on the box. The link lives as long as the
+box does.
 
 ## API
 
@@ -95,7 +114,7 @@ hands out). Anything else is answered 401.
 
 ### `GET /health`
 
-`{"ok": true, "model": "SoulX-FlashHead lite", "fps": 25, "slice_frames": 24, "look_frames": 0,
+`{"ok": true, "model": "SoulX-FlashHead pro, 4 steps, TAEHV", "fps": 25, "slice_frames": 28, "look_frames": 0,
 "width": 960, "height": 720, "speed": {...the last slice, milliseconds per stage}, "sessions": n,
 "idle_seconds": n}`
 
@@ -113,7 +132,9 @@ mu-law, any rate, mono). Answer: `video/mp4`, `slice_frames` pictures, silent.
 
 ## Settings (environment variables, or `flash.env` next to the logs)
 
-`FLASH_FRAMES` (33), `FLASH_LOOK` (0), `FLASH_PICTURE` (`inputs/start.jpg`), `FLASH_BOX`
+`FLASH_MODEL` (`pro`; `lite`), `FLASH_STEPS` (4), `FLASH_SIZE` (416 for pro, 512 for lite; a
+multiple of 16), `FLASH_TAE` (1: the small decoder, pro only), `FLASH_FRAMES` (33), `FLASH_LOOK`
+(0), `FLASH_PICTURE` (`inputs/start.jpg`), `FLASH_BOX`
 (`520,0,520`: left, top and size of the square in the picture's own pixels; it should land on
 whole pixels of the output), `FLASH_OUT` (`960x720`), `FLASH_FEATHER` (0.09) and
 `FLASH_FEATHER_BOTTOM` (0.14: the fade at the square's edges as a share of its size),
@@ -124,7 +145,7 @@ whole pixels of the output), `FLASH_OUT` (`960x720`), `FLASH_FEATHER` (0.09) and
 ## In the app
 
 `src/lib/avatar/flashTalk.ts` uses it in a live call whenever `/api/avatar/status` reports one
-(`flash`): her voice is held back about 1.5 s, cut into slices and sent in order all through the
+(`flash`): her voice is held back about 2.5 s, cut into slices and sent in order all through the
 call, her silences too; the answers are joined and a clock keeps the picture on the sound being
 heard. Between calls, and whenever a slice is late or the server stops answering, the filmed
 clips show; the stream is started again after 2, 5 and 10 seconds. If it never produces a picture
@@ -143,7 +164,8 @@ her hands do not move, and the room is a still picture.
 
 | file | what |
 |---|---|
-| `setup.sh` | one-time build under `/workspace/tts-2-lab` |
+| `setup.sh` | builds what is missing: the model on the storage, Python on the box |
 | `server.py` | the server |
 | `start.sh`, `stop.sh` | run it, with its tunnel, and tell the app |
+| `preview.sh` | run a branch of the app on the box, with the server, behind its own link |
 | `test_client.py` | feeds it a recording the way a call does; writes the film and the timings |

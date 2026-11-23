@@ -24,10 +24,23 @@ const SITE = process.env.SITE || "http://localhost:3000";
 const VOICE = process.env.VOICE_URL || "http://127.0.0.1:8100/voice.wav";
 fs.mkdirSync(out, { recursive: true });
 
+// REAL_CALL=1: do not answer the call here; let the page reach the voice model itself. MIC=<file.wav>
+// is then what the "caller" says (Chrome plays it as the microphone).
+// RECORD=1: also save a film of the page (<out>/*.webm).
+const real = process.env.REAL_CALL === "1";
 const browser = await chromium.launch({
-  args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--autoplay-policy=no-user-gesture-required"],
+  // The two ends of the stand-in call are in one page: let them find each other on this machine.
+  args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--autoplay-policy=no-user-gesture-required",
+    "--allow-loopback-in-peer-connection", "--disable-features=WebRtcHideLocalIpsWithMdns",
+    ...(process.env.MIC ? [`--use-file-for-fake-audio-capture=${process.env.MIC}`] : [])],
 });
-const context = await browser.newContext({ viewport: { width: 880, height: 900 } });
+// VIEW=390x844: the page as a phone shows it (touch, two device pixels to one).
+const [width, height] = (process.env.VIEW || "880x1300").split("x").map(Number);
+const context = await browser.newContext({
+  viewport: { width, height },
+  ...(process.env.VIEW ? { deviceScaleFactor: 2, isMobile: true, hasTouch: true } : {}),
+  ...(process.env.RECORD === "1" ? { recordVideo: { dir: out, size: { width, height } } } : {}),
+});
 await context.grantPermissions(["microphone"], { origin: new URL(SITE).origin });
 const page = await context.newPage();
 const errors = [];
@@ -38,7 +51,21 @@ page.on("dialog", (dialog) => {
   dialog.dismiss().catch(() => {});
 });
 
-await page.addInitScript(({ VOICE }) => {
+// RELAY=turn:127.0.0.1:3478,user,password (with REAL_CALL=1): send the call through a relay on
+// this machine. For a box whose network Chrome does not list: it then finds no way out and the
+// call never connects, although the machine itself reaches the voice model.
+if (process.env.RELAY) {
+  const [urls, username, credential] = process.env.RELAY.split(",");
+  await page.addInitScript((server) => {
+    const Native = window.RTCPeerConnection;
+    window.RTCPeerConnection = function (config, ...rest) {
+      return new Native({ ...(config || {}), iceServers: [server], iceTransportPolicy: "relay" }, ...rest);
+    };
+    window.RTCPeerConnection.prototype = Native.prototype;
+  }, { urls, username, credential });
+}
+
+if (!real) await page.addInitScript(({ VOICE }) => {
   const real = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input.url;
@@ -78,6 +105,8 @@ await page.goto(SITE, { waitUntil: "domcontentloaded" });
 // Her clips load first: the call waits for the stage anyway, but the page must have asked for it.
 await page.waitForFunction(() => document.querySelectorAll("video").length >= 3, null, { timeout: 60000 });
 await page.getByRole("button", { name: /call her/i }).click();
+// The page scrolls to the call button; she is at the top.
+await page.evaluate(() => window.scrollTo(0, 0));
 await page.waitForFunction(() => window.__flash, null, { timeout: 30000 }).catch(() => {});
 const started = await page.evaluate(() => Boolean(window.__flash));
 
@@ -119,9 +148,12 @@ await page.screenshot({ path: path.join(out, "page.png") });
 // Hang up: the page must give the loudspeaker back and stop the stream.
 await page.getByRole("button", { name: /end call/i }).click().catch(() => {});
 await page.waitForTimeout(800);
+const captions = await page.evaluate(() => document.body.innerText.match(/HER[\s\S]{0,400}/)?.[0] ?? "");
+const link = await page.evaluate(() => window.__her ? window.__her.connectionState : "real call");
 const after = await page.evaluate(() => ({
   streamOnScreen: [...document.querySelectorAll("video")].some((v) => v.src.startsWith("blob:") && getComputedStyle(v).opacity === "1" && v.style.zIndex === "3"),
 }));
+await context.close();
 await browser.close();
 
 // Brightness shown against loudness played: at which delay do they agree best?
@@ -160,7 +192,7 @@ const result = {
   streamOnScreenWhileSheSpeaks: speaking.length ? Math.round(speaking.filter((s) => s[3] > 0.5).length / speaking.length * 1000) / 1000 : null,
   filmedClipShowedInsteadSeconds: gaps,
   voiceDelaySeconds: samples.length ? samples[samples.length - 1][5] : null,
-  describe, afterHangUp: after, errors,
+  describe, captions, callConnection: link, afterHangUp: after, errors,
 };
 fs.writeFileSync(path.join(out, "samples.json"), JSON.stringify(samples));
 fs.writeFileSync(path.join(out, "result.json"), JSON.stringify(result, null, 1) + "\n");

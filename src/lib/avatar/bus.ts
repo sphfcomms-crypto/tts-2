@@ -30,7 +30,14 @@ export type Direct = { url: string; token: string; audioPose?: boolean };
 
 // The whole-face server (avatar-flash/server.py), when one is running: its
 // address, a pass like Direct's, and the length of the slices it draws.
-export type Flash = { url: string; token: string; sliceFrames: number; lookFrames: number; fps: number };
+export type Flash = {
+  url: string;
+  token: string;
+  sliceFrames: number;
+  lookFrames: number;
+  fps: number;
+  workSeconds?: number;
+};
 
 type Tap = { analyser: AnalyserNode; release: () => void };
 
