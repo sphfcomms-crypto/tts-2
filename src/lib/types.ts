@@ -3,4 +3,5 @@
 export interface Vibe {
   name: string;
   prompt: string;
+  callStyle: string;
 }
