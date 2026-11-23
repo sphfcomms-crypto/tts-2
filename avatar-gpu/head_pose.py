@@ -1,5 +1,6 @@
 """Move the already rendered face, hair and upper neck together on the native filmed take."""
 from pathlib import Path
+from zipfile import BadZipFile
 
 import cv2
 import numpy as np
@@ -18,7 +19,7 @@ def geometry_for(meta, archive=ARCHIVE):
             if name not in data or str(data[name + "_sha256"]) != meta.get("source_sha256"):
                 return None
             points = data[name]
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, EOFError, BadZipFile):
         return None
     if points.shape != (meta["frames"], 5) or not np.isfinite(points).all() or (points[:, 2:4] <= 0).any():
         return None

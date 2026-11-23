@@ -44,6 +44,8 @@ class HeadPoseTest(unittest.TestCase):
             np.testing.assert_array_equal(geometry_for(meta, archive), points)
             for override in (dict(source_sha256="stale"), dict(frames=5), dict(width=720), dict(name="talk")):
                 self.assertIsNone(geometry_for({**meta, **override}, archive))
+            archive.write_bytes(b"PK\x03\x04" + bytes(32))
+            self.assertIsNone(geometry_for(meta, archive))
 
 
 if __name__ == "__main__":
