@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Measure real 400-ms browser requests. Never exposes, updates or rents a server."""
 import argparse
+from collections import Counter
 import concurrent.futures
 import io
 import json
@@ -66,10 +67,12 @@ def main():
             with urllib.request.urlopen(req, timeout=10) as r:
                 data = r.read()
                 assert r.headers["X-Frames"] == "10"
+                acoustic = r.headers.get("X-Avatar-Acoustic", "unreported")
                 timings = {k:float(v) for k,v in (q.strip().split(";dur=") for q in r.headers["Server-Timing"].split(","))}
         else:
             data, frames, metrics = render(atlas, model, body, i*7, 200, 100, threads=opts.threads)
             assert frames == 10
+            acoustic = model.last_backend
             timings = {k:v*1000 for k,v in metrics.items()}
         milliseconds = 1000*(time.perf_counter()-at)
         if i == 0:
@@ -78,11 +81,12 @@ def main():
                 pts = [float(f.pts*f.time_base) for f in movie.decode(stream)]
                 assert len(movie.streams.audio)==0 and len(pts)==10 and np.allclose(pts, np.arange(10)/FPS)
             assert b"moof" in data
-        return {"elapsed": milliseconds, **timings}
-    cold = measured(0)
+        return acoustic, {"elapsed": milliseconds, **timings}
+    _, cold = measured(0)
     with concurrent.futures.ThreadPoolExecutor(max_workers=opts.concurrent) as pool:
-        times = list(pool.map(measured, range(max(1,opts.runs))))
+        used, times = zip(*pool.map(measured, range(max(1,opts.runs))))
     print(json.dumps({"unit":opts.clip,"calls":len(times),"concurrency":opts.concurrent,
+                      "acoustic_model_requests":dict(Counter(used)),
                       "independent_voiced_requests":len(chunks),"cold_ms":round(cold["elapsed"],1),
                       "ms":{k:dict(zip(["median","p95","max"],np.round(np.percentile([v[k] for v in times],[50,95,100]),1).tolist())) for k in times[0]},
                       "under_400ms":sum(v["elapsed"] < 400 for v in times)},indent=2))

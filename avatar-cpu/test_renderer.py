@@ -21,6 +21,9 @@ from server import Handler
 
 
 class FixedPhones:
+    backend = "uni2005"
+    last_backend = "uni2005"
+
     def __init__(self, values):
         self.values = np.asarray(values, np.float32)
 
@@ -128,6 +131,7 @@ class FrameTest(unittest.TestCase):
                     self.assertEqual(r.headers["X-Frames"],"10")
                     self.assertEqual(r.headers["X-Next-Start"],"7")
                     self.assertEqual(r.headers["X-Avatar-Renderer"],"cpu")
+                    self.assertEqual(r.headers["X-Avatar-Acoustic"],"uni2005")
                     self.assertIn(b"moof",r.read())
                 with self.assertRaises(HTTPError) as err:
                     urlopen(Request(base+"not_installed",data=payload,headers=headers))

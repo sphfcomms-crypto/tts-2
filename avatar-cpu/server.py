@@ -37,6 +37,7 @@ class Engine:
 
     def health(self):
         return {"ok": True, "model": "CPU phoneme atlas", "renderer": "cpu",
+                "acoustic_model": self.model.backend,
                 "encoder": "libx264 25 fps, silent", "clips": [c.info() for c in self.clips.values()],
                 "requests": self.requests, "uptime_seconds": round(time.monotonic() - self.started)}
 
@@ -120,6 +121,7 @@ class Handler(BaseHTTPRequestHandler):
             "X-Start": str(start), "X-Frames": str(frames), "X-Cycle": str(clip.cycle),
             "X-Next-Start": str((start + frames) % clip.cycle), "X-Duration": f"{frames / FPS:.3f}",
             "X-Avatar-Renderer": "cpu",
+            "X-Avatar-Acoustic": engine.model.last_backend,
             "Server-Timing": ", ".join(f"{k};dur={v * 1000:.1f}" for k, v in times.items()),
         })
 

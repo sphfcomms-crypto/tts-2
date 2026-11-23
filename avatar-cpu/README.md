@@ -24,6 +24,8 @@ The included systemd template runs as the unprivileged `tts-avatar` account. Cre
 
 Both endpoints require the existing `x-avatar-key` header. `GET /health` returns verified native unit IDs and dimensions. `POST /speak?audio=0&clip=<name>&start=<frame>&lead_ms=<ms>&tail_ms=<ms>` accepts the same 16 kHz G.711 μ-law or 24 kHz PCM WAV as the browser. The body limit is 200,000 bytes and the requested interval is at most five seconds. The response is silent fragmented H.264 MP4 with `X-Start`, `X-Frames`, `X-Next-Start`, `X-Cycle` and `X-Duration`. Out-of-order requests are independent. A missing unit returns 404 and an overloaded worker returns 503.
 
+The health field `acoustic_model` identifies the configured recognizer. Each video response reports the recognizer used for its waveform in `X-Avatar-Acoustic`. A piece using only the filmed resting mouth reports `rest`. The benchmark counts those results separately so a fallback can be distinguished from a faster run of the higher-accuracy model.
+
 ```bash
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 venv/bin/python test_renderer.py
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 venv/bin/python benchmark.py \
