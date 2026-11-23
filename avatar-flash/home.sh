@@ -4,11 +4,13 @@
 #   bash home.sh <address of a running copy of the app> [branch]
 #   bash home.sh --stop
 #
-# Needs one NVIDIA card about as fast as an RTX 4080 or better, with 12 GB or more (an RTX 5070 Ti
-# does; several cards in different machines cannot share one call), on Linux or on Ubuntu under WSL2
-# on Windows. It builds what is missing (about 27 GB under ~/tts-2-lab: the model 17, Python 8, the
-# app 2; ten minutes the first time, then under a minute), starts the video server at the size this
-# card keeps up with, builds and starts the app, and prints its link:
+# Needs one NVIDIA card with 12 GB or more, on Linux or on Ubuntu under WSL2 on Windows. She is
+# drawn at the size the card keeps up with: 416 pixels on an L40S, smaller and less sharp on a
+# slower card. Several cards in different machines cannot share one call.
+#
+# It builds what is missing (about 27 GB under ~/tts-2-lab: the model 17, Python 8, the app 2; ten
+# minutes the first time, then under a minute), starts the video server, builds and starts the
+# app, and prints its link:
 #
 #   APP_URL=https://....trycloudflare.com
 #
