@@ -32,6 +32,7 @@ type Listing = {
     frames: number;
     pool: Unit["pool"];
     also?: Unit["pool"][];
+    cue?: Unit["cue"];
     weight?: number;
     mouths?: boolean;
     rise?: number;
@@ -42,7 +43,7 @@ type Listing = {
 // clips: the names the GPU box has prepared; only those can carry her lips.
 async function listUnits(clips: string[]): Promise<Unit[]> {
   try {
-    const res = await fetch(`${FILES}/units.json`);
+    const res = await fetch(`${FILES}/units.json`, { cache: "no-store" });
     if (!res.ok) return oneLoop();
     const listing = (await res.json()) as Listing;
     const units = (listing.units ?? [])
@@ -82,6 +83,7 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
   const second = useRef<HTMLVideoElement>(null);
   const director = useRef<Director | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  const [filmCamera, setFilmCamera] = useState(false);
   const [talking, setTalking] = useState(false);
   const [mood, setMood] = useState<Mood>(avatarBus.mood);
 
@@ -97,6 +99,7 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
     const show = (front: number, soft: boolean) => {
       const top = players[front];
       const under = players[1 - front];
+      setFilmCamera(Boolean(top.dataset.unit?.startsWith("oa1_")));
       top.style.zIndex = "2";
       under.style.zIndex = "1";
       if (soft) top.animate([{ opacity: 0 }, { opacity: 1 }], { duration: DISSOLVE, easing: "linear" });
@@ -109,10 +112,14 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
       made.want =
         avatarBus.mood === "thinking" ? "think" : avatarBus.mood === "listening" ? "listen" : "idle";
       director.current = made;
-      const begin = () => {
-        if (gone || !made || made.running) return;
+      const hasFilm = units.some(unit => unit.cue) && units.some(unit => unit.name === "oa1_listen_neutral");
+      let published = false;
+      const begin = (finished = false) => {
+        if (gone || !made || published) return;
         if (!units.some((unit) => unit.url && unit.pool === "listen")) return;
-        made.start();
+        if (!made.running) made.start();
+        if (hasFilm && !finished && !made.filmReady) return;
+        published = true;
         avatarBus.setStage({
           video: talk.current!,
           speaking: setSpeaking,
@@ -122,7 +129,10 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
       };
       // Two at a time, in the order she needs them. She starts as soon as
       // she has one clip to listen in; the others join as they arrive.
-      const queue = [...units].sort((a, b) => ORDER.indexOf(a.pool) - ORDER.indexOf(b.pool));
+      const priority = (unit: Unit) => unit.name === "oa1_listen_neutral" ? -4 :
+        unit.cue === "reflect" || unit.cue === "explain" ? -3 :
+        unit.cue ? -2 : ORDER.indexOf(unit.pool);
+      const queue = [...units].sort((a, b) => priority(a) - priority(b));
       const worker = async () => {
         for (let unit = queue.shift(); unit && !gone; unit = queue.shift()) {
           try {
@@ -136,6 +146,7 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
         }
       };
       await Promise.all([worker(), worker()]);
+      begin(true);
     });
     const stop = avatarBus.onMood(setMood);
     return () => {
@@ -168,7 +179,7 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
   return (
     <div
       className="relative mx-auto w-full max-w-[720px] aspect-[4/3] mb-10 rounded-lg overflow-hidden shadow-textarea bg-black bg-cover bg-center"
-      style={{ backgroundImage: `url(${FILES}/poster.jpg)` }}
+      style={{ backgroundImage: `url(${FILES}/${clips.includes("oa1_listen_neutral") ? "oa1-poster.jpg" : "poster.jpg"})` }}
     >
       <video ref={first} className={layer} style={{ zIndex: 2 }} muted playsInline preload="auto" />
       <video ref={second} className={layer} style={{ zIndex: 1 }} muted playsInline preload="auto" />
@@ -194,7 +205,7 @@ export function VideoAvatar({ clips }: { clips: string[] }) {
         alt=""
         draggable={false}
         className={`${layer} pointer-events-none select-none`}
-        style={{ zIndex: 4, visibility: speaking ? "hidden" : "visible" }}
+        style={{ zIndex: 4, visibility: speaking || filmCamera ? "hidden" : "visible" }}
         onError={(event) => {
           event.currentTarget.style.display = "none";
         }}

@@ -1,5 +1,6 @@
 import { avatarBus, Stage } from "./bus";
 import { CallAudioHandoff } from "./callAudioHandoff";
+import type { CallGestures } from "./callGestures";
 import { CallVideoHealth } from "./callVideoHealth";
 import { FPS, nudge, stageClock } from "./director";
 
@@ -50,11 +51,14 @@ const AHEAD = 0.09;
 const MOST_LATENCY = 0.05;
 const TELL = 8; // seconds between reports while she is speaking
 
+function videoSource(): typeof MediaSource | undefined {
+  if (typeof window === "undefined") return undefined;
+  const browser = window as unknown as { MediaSource?: typeof MediaSource; ManagedMediaSource?: typeof MediaSource };
+  return [browser.MediaSource, browser.ManagedMediaSource].find(source => source?.isTypeSupported(TYPE));
+}
+
 export function canShowVideo(): boolean {
-  if (typeof window === "undefined") return false;
-  const scope = window as unknown as { MediaSource?: typeof MediaSource; ManagedMediaSource?: typeof MediaSource };
-  const Source = scope.MediaSource ?? scope.ManagedMediaSource;
-  return Boolean(Source && Source.isTypeSupported(TYPE));
+  return Boolean(videoSource());
 }
 
 type Segment = {
@@ -85,7 +89,7 @@ export type HeldCallAudio = {
 // audio graph the Play button builds (which then must not be connected to
 // the speakers itself).
 export type Voice =
-  | { stream: MediaStream }
+  | { stream: MediaStream; gestures: CallGestures }
   | { context: AudioContext; node: AudioNode };
 
 const tail = (samples: Int16Array, count: number) =>
@@ -154,27 +158,29 @@ class Reel {
 
   open(): Promise<void> {
     return new Promise<void>((ready, failed) => {
-      const scope = window as unknown as { MediaSource?: typeof MediaSource; ManagedMediaSource?: typeof MediaSource };
-      const Source = scope.MediaSource ?? scope.ManagedMediaSource;
-      if (!Source || !Source.isTypeSupported(TYPE)) {
-        return failed(new Error("this browser cannot join the video"));
-      }
+      const Source = videoSource();
+      if (!Source) return failed(new Error("this browser cannot join the video"));
       const source = new Source();
-      this.url = URL.createObjectURL(source);
+      const timeout = window.setTimeout(() => {
+        source.removeEventListener("sourceopen", opened);
+        failed(new Error("the video player did not open"));
+      }, 8000);
+      const opened = () => {
+        window.clearTimeout(timeout);
+        try {
+          this.buffer = source.addSourceBuffer(TYPE);
+          ready();
+        } catch (err) {
+          failed(err);
+        }
+      };
+      source.addEventListener("sourceopen", opened, { once: true });
       this.video.muted = true;
+      // On iPhone, ManagedMediaSource requires remote playback to be disabled
+      // when the player has no alternate AirPlay source.
+      this.video.disableRemotePlayback = true;
+      this.url = URL.createObjectURL(source);
       this.video.src = this.url;
-      source.addEventListener(
-        "sourceopen",
-        () => {
-          try {
-            this.buffer = source.addSourceBuffer(TYPE);
-            ready();
-          } catch (err) {
-            failed(err);
-          }
-        },
-        { once: true }
-      );
     });
   }
 
@@ -282,6 +288,7 @@ export class LiveTalk {
     if ("stream" in this.voice) {
       context = new AudioContext();
       this.ownsContext = true;
+      this.stage.director.liveCall(true);
       source = context.createMediaStreamSource(this.voice.stream);
     } else {
       context = this.voice.context;
@@ -429,6 +436,7 @@ export class LiveTalk {
 
   stop() {
     if (this.stopped) return;
+    if ("stream" in this.voice) this.stage.director.liveCall(false);
     this.stopped = true;
     this.finishHandoff?.();
     this.endCalibration?.();
@@ -590,13 +598,18 @@ export class LiveTalk {
     // When this block will be heard (and its picture seen), on the
     // director's clock.
     const lag = this.lag(context);
-    const seen = this.firstAt + at / this.rate + lag + (stageClock() - context.currentTime);
+    const captured = this.firstAt + at / this.rate;
+    const seen = captured + lag + (stageClock() - context.currentTime);
+    const gestures = "stream" in this.voice ? this.voice.gestures : undefined;
+    gestures?.hear(captured, half.length / this.rate, Math.sqrt(sum / half.length), loud);
 
     // Is she in the middle of a line? (Her body gestures while she is.)
     if (loud) {
       if (!this.talking) {
         this.talking = true;
-        if (this.greet && this.lines === 0) this.stage.director.greet = true;
+        const cue = gestures?.cue(captured, true, this.greet && this.lines === 0);
+        if (cue) this.stage.director.gesture(cue, seen);
+        if (this.greet && this.lines === 0 && !cue) this.stage.director.greet = true;
         this.lines += 1;
         // The director is told now, about a second before she is heard,
         // so that a gesture begins with her voice and not seconds later.
@@ -663,6 +676,12 @@ export class LiveTalk {
     const lag = this.lag(context);
     let seen = audioStart + lag + (stageClock() - context.currentTime);
     let frames = Math.ceil((count / this.rate) * FPS - 0.001);
+    if ("stream" in this.voice) {
+      for (let i = 0; i < frames; i++) {
+        const cue = this.voice.gestures.cue(audioStart + i / FPS);
+        if (cue) this.stage.director.gesture(cue, seen + i / FPS);
+      }
+    }
     let taken = 0; // samples of the chunk already given to a piece
 
     while (frames > 0) {

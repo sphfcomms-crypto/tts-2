@@ -46,6 +46,8 @@ const state = {
   stage: null as Stage | null,
   direct: null as Direct | null,
 };
+let videoAvailable: boolean | undefined;
+const stageChanges = new Set<() => void>();
 const watchers = new Set<(mood: Mood) => void>();
 
 function tap(source: AudioNode): Tap {
@@ -126,6 +128,28 @@ export const avatarBus = {
   },
   setStage: (stage: Stage | null) => {
     state.stage = stage;
+    stageChanges.forEach(notify => notify());
+  },
+  setVideoAvailable(value: boolean | undefined) {
+    videoAvailable = value;
+    stageChanges.forEach(notify => notify());
+  },
+  // Wait before buying/opening the voice session. Opening it as soon as
+  // the microphone is ready can permanently select the local face on a cold page.
+  waitForStage(signal: AbortSignal) {
+    if (state.stage || videoAvailable === false || signal.aborted) return Promise.resolve();
+    return new Promise<void>(resolve => {
+      const finish = () => {
+        window.clearTimeout(timer);
+        stageChanges.delete(check);
+        signal.removeEventListener("abort", finish);
+        resolve();
+      };
+      const check = () => { if (state.stage || videoAvailable === false) finish(); };
+      const timer = window.setTimeout(finish, 8000);
+      stageChanges.add(check);
+      signal.addEventListener("abort", finish, { once: true });
+    });
   },
   get stage() {
     return state.stage;

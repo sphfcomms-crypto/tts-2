@@ -1,3 +1,5 @@
+import { callUnitNames, type FilmCue, type GestureCue } from "./callGestures";
+
 // Her body language.
 //
 // She is filmed in short clips ("units"): listening, nodding, an open-hand
@@ -27,6 +29,7 @@ export type Unit = {
   name: string;
   frames: number;
   pool: Pool;
+  cue?: FilmCue; // native acting shown for this live conversational intention
   // Other moments it also suits (a quiet listening clip also suits idling).
   also?: Pool[];
   // How often it is chosen against the others of its pool (1 when absent):
@@ -67,6 +70,7 @@ type Slot = {
   to: number; // one past the last frame shown
   soft: boolean; // the picture before it is in another pose: dissolve into it
   shown: boolean;
+  cueSequence?: number;
   wrap?: boolean; // her way back to rest after a movement was cut short
 };
 
@@ -116,6 +120,10 @@ export class Director {
   private claimed = 0; // her lips have been asked for up to this moment
   private softNext = false; // the next unit planned follows a cut
   private lastCue = "";
+  private callAct: GestureCue | null = null;
+  private sequence = 0;
+  private film = false;
+  private live = false;
   private lately: string[] = []; // the units chosen most recently
 
   // players: two video elements, one on top of the other. One shows the
@@ -158,10 +166,52 @@ export class Director {
     for (const player of this.players) player.pause();
   }
 
+  // A live call uses a single camera family per spoken line. The quiet
+  // partner can safely show while a GPU-rendered speech chunk is loading.
+  get filmReady() {
+    return this.units.some(u => u.url && u.pool === "talk" && u.cue) &&
+      this.units.some(u => u.url && u.name === "oa1_listen_neutral");
+  }
+
+  liveCall(on: boolean) {
+    this.live = on;
+    this.callAct = null;
+    this.film = false;
+  }
+
+  gesture(cue: GestureCue, by: number) {
+    if (!this.live) return;
+    if (!this.callAct) {
+      this.film = this.filmReady;
+    }
+    if (this.callAct?.role === cue.role && this.callAct.clause === cue.clause) return;
+    this.callAct = cue;
+    this.sequence++;
+    if (!this.running || this.want !== "talk") return;
+    // The GPU may already be drawing the last frames of the preceding
+    // clause. Only alter the unreserved future, and let moving hands
+    // finish their existing action before taking on a different gesture.
+    const free = Math.max(by, stageClock() + PREPARE, this.claimed);
+    this.plan(free);
+    const slot = this.slotAt(free);
+    const i = this.slots.indexOf(slot);
+    if (!slot.shown && i > 0 && slot.start >= Math.max(stageClock() + PREPARE, this.claimed) - 1e-7 &&
+        free - slot.start < .85) this.slots.splice(i);
+    else {
+      this.slots.splice(i + 1);
+      const frame = slot.from + Math.ceil((free - slot.start) * FPS);
+      if (!slot.wrap && frame > slot.from + SHORTEST &&
+          slot.unit.rise !== undefined && frame <= slot.unit.rise && slot.to - frame >= SHORTEST) {
+        slot.to = frame;
+      }
+    }
+  }
+
   // Discard promises about frames for audio that the caller has interrupted.
   cancelSpeech() {
     this.claimed = 0;
     this.greet = false;
+    this.callAct = null;
     this.turn("listen");
     this.greet = false;
   }
@@ -188,7 +238,10 @@ export class Director {
   // be heard (when she begins to speak); a gesture then starts with it.
   turn(want: Want, by?: number) {
     this.want = want;
-    if (want !== "talk") this.lastCue = "";
+    if (want !== "talk") {
+      this.lastCue = "";
+      this.callAct = null;
+    }
     if (!this.running) return;
     const now = stageClock();
     // Nothing that is about to be shown, or that her lips are already
@@ -280,6 +333,7 @@ export class Director {
         to: unit.frames,
         soft: this.softNext,
         shown: false,
+        cueSequence: this.want === "talk" && this.callAct ? this.sequence : undefined,
       };
       this.softNext = false;
       this.slots.push(last);
@@ -289,11 +343,28 @@ export class Director {
   private choose(previous?: Unit): Unit {
     const ready = this.units.filter((unit) => unit.url);
     let pool: Pool = this.want;
+    if (this.live && pool === "talk" && this.callAct) {
+      const used = this.slots.at(-1)?.cueSequence === this.sequence;
+      // A long clause continues in a quiet performance after its first
+      // gesture. Do not start counting or greeting again by chance.
+      const role = used ? "reflect" : this.callAct.role;
+      for (const name of callUnitNames(role, this.film)) {
+        const unit = ready.find(u => this.film ? u.pool === "talk" && u.cue === name : u.name === name);
+        if (unit) return unit;
+      }
+    }
+    if (this.live && pool !== "talk") {
+      const names = pool === "think" ? ["oa1_think"] : ["oa1_listen_neutral", "oa1_listen_nod"];
+      const nativeQuiet = names.map(name => ready.find(u => u.name === name)).filter((u): u is Unit => !!u);
+      if (nativeQuiet.length) return nativeQuiet.find(u => u !== previous) ?? nativeQuiet[0];
+    }
     if (this.want === "talk" && this.greet && ready.some((unit) => unit.pool === "greet")) {
       this.greet = false;
       pool = "greet";
     }
-    let choice = ready.filter((unit) => inPool(unit, pool));
+    let choice = ready.filter((unit) => inPool(unit, pool) && !unit.cue);
+    // Published film acting uses only its matching silent camera. An
+    // incomplete deployment can still use the installed legacy units.
     if (pool === "talk") {
       const cue = speechGesture(this.phrase());
       // One expressive movement is enough for a phrase. While she continues
@@ -335,7 +406,14 @@ export class Director {
     return picked;
   }
 
-  private load(player: number, unit: Unit) {
+  private load(player: number, planned: Unit) {
+    // The actual film utterance is visible only through the GPU layer,
+    // with the current voice redrawn on it. During a late or missing piece
+    // the lower layer always has a real quiet mouth, including at startup.
+    const unit = planned.mouths && planned.cue
+      ? this.units.find(u => u.url && u.name === "oa1_listen_neutral") ??
+        this.units.find(u => u.url && u.pool === "listen" && !u.mouths) ?? planned : planned;
+    this.players[player].loop = unit !== planned;
     if (this.loaded[player] === unit) return;
     this.loaded[player] = unit;
     const video = this.players[player];
@@ -344,11 +422,16 @@ export class Director {
     video.load();
   }
 
+  private displayTime(player: number, time: number) {
+    const unit = this.loaded[player];
+    return this.players[player].loop && unit ? time % (unit.frames / FPS) : time;
+  }
+
   // Has the player hold the slot's first frame, ready to be shown.
   private cue(player: number, slot: Slot) {
     this.load(player, slot.unit);
     const video = this.players[player];
-    const at = slot.from / FPS;
+    const at = this.displayTime(player, slot.from / FPS);
     if (video.paused && !video.seeking && Math.abs(video.currentTime - at) > 0.02) {
       video.currentTime = at;
     }
@@ -365,7 +448,7 @@ export class Director {
       const back = 1 - this.front;
       this.load(back, due.unit);
       const video = this.players[back];
-      const want = due.from / FPS + Math.max(0, t - due.start);
+      const want = this.displayTime(back, due.from / FPS + Math.max(0, t - due.start));
       if (Math.abs(video.currentTime - want) > 0.04) video.currentTime = want;
       video.playbackRate = 1;
       video.play().catch(() => {});
@@ -392,7 +475,7 @@ export class Director {
       this.cue(1 - this.front, next);
     }
     const video = this.players[this.front];
-    const want = current.from / FPS + (t - current.start);
+    const want = this.displayTime(this.front, current.from / FPS + (t - current.start));
     if (t < this.end(current) && !video.seeking && video.readyState >= 2) {
       const behind = want - video.currentTime;
       if (Math.abs(behind) > 0.12) {

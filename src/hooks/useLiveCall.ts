@@ -1,3 +1,4 @@
+import { CallGestures } from "@/lib/avatar/callGestures";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CallTurns, transcriptSpan } from "@/lib/callTurns";
 import { appStore } from "@/lib/store";
@@ -33,6 +34,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
   const timers = useRef<number[]>([]);
   const active = useRef(false);
   const generation = useRef(0);
+  const videoStartup = useRef<AbortController | null>(null);
   const liveSpeech = useRef<ReturnType<typeof avatarBus.startLiveSpeech> | null>(null);
   // Web Audio taps for the avatar: her voice and the caller's microphone.
   const hearing = useRef<{ context: AudioContext; release: (() => void)[] } | null>(null);
@@ -42,6 +44,8 @@ export function useLiveCall({ onCaption, onError }: Options) {
   const cleanup = useCallback(() => {
     active.current = false;
     generation.current += 1;
+    videoStartup.current?.abort();
+    videoStartup.current = null;
     liveSpeech.current?.release();
     liveSpeech.current = null;
     timers.current.forEach((t) => window.clearInterval(t));
@@ -98,6 +102,10 @@ export function useLiveCall({ onCaption, onError }: Options) {
       active.current = true;
       const callGeneration = ++generation.current;
       const isCurrent = () => generation.current === callGeneration;
+      const stageWait = new AbortController();
+      videoStartup.current = stageWait;
+      const stageReady = appStore.getState().avatar && canShowVideo()
+        ? avatarBus.waitForStage(stageWait.signal) : Promise.resolve();
       setStatus("connecting");
       setSeconds(0);
 
@@ -116,7 +124,11 @@ export function useLiveCall({ onCaption, onError }: Options) {
         mic.current = stream;
         const speech = avatarBus.startLiveSpeech();
         liveSpeech.current = speech;
-        const turns = new CallTurns(speech);
+        const gestures = new CallGestures();
+        const turns = new CallTurns({
+          update(text, span) { speech.update(text, span); gestures.update(text, span); },
+          clear() { speech.clear(); gestures.clearCaptions(); },
+        });
         avatarBus.setMood("listening");
 
         // The avatar listens to the caller and moves her mouth with her
@@ -183,7 +195,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
           };
           if (stage && canShowVideo() && !face.current && !appStore.getState().localCallAvatar) {
             audio.muted = true;
-            const talk = new LiveTalk(stage, { stream: remote }, switchToLocalAvatar, greet);
+            const talk = new LiveTalk(stage, { stream: remote, gestures }, switchToLocalAvatar, greet);
             face.current = talk;
             if (process.env.NODE_ENV !== "production") {
               Object.assign(window, { __liveTalk: talk });
@@ -263,6 +275,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
             const span = transcriptSpan(event.start_ms, event.end_ms);
             const measuring = avatarBus.ear?.context.state === "running";
             if (event.delta.trim() && turns.caller(span, measuring ? now - lastMic < 650 : !!span)) {
+              gestures.caller(event.delta);
               lastInput = now;
               if (face.current?.hasSpeech) face.current.interrupt();
               avatarBus.setMood("listening");
@@ -305,6 +318,7 @@ export function useLiveCall({ onCaption, onError }: Options) {
           });
         });
 
+        await stageReady;
         if (!isCurrent()) return;
         const res = await fetch("/api/call", {
           method: "POST",
