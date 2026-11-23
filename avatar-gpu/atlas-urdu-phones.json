@@ -1,0 +1,86 @@
+{
+  "master_pcm_s16le_sha256": "a626648215b54de0f5f762b4cf1aa9cf7c50f9413153aaf9ad49246740748b58",
+  "sample_rate": 24000,
+  "duration_seconds": 51.29,
+  "evidence": "Known spoken text by segment, actual waveform, wav2vec2-lv-60-espeak-cv-ft in 3.6s/0.4s contexts and local Praat Burg vowel formants. Each row is a candidate for the geometry screener, not a visual success claim.",
+  "classes": {
+    "REST": [
+      {"audio": "master", "time": 21.22, "word": "between thori hai and aur suno", "phone": "silence", "confidence": "verified-zero waveform"},
+      {"audio": "master", "time": 10.43, "word": "between laga and achha", "phone": "silence", "confidence": "verified-zero waveform"},
+      {"audio": "master", "time": 1.34, "word": "after hoon", "phone": "silence", "confidence": "verified-zero waveform"}
+    ],
+    "MBP": [
+      {"audio": "master", "time": 0.42, "word": "main / میں", "phone": "m", "confidence": "high; established nasal murmur before the vowel", "ctc_3p6s_and_0p4s": [["m", 0.9948], ["m", 0.9933]]},
+      {"audio": "master", "time": 11.785, "word": "beech / بیچ", "phone": "b", "confidence": "high; oral closure before burst; 28 ms before decoder peak", "ctc_3p6s_and_0p4s": [["b", 0.9573], ["b", 0.9544]]},
+      {"audio": "master", "time": 36.385, "word": "pehle / پہلے", "phone": "p", "confidence": "high; closure before burst; 28 ms before decoder peak", "ctc_3p6s_and_0p4s": [["p", 0.8943], ["p", 0.9263]]}
+    ],
+    "FV": [
+      {"audio": "master", "time": 31.62, "word": "dafaa / دفعہ", "phone": "f", "confidence": "high; unvoiced frication between vowels", "ctc_3p6s_and_0p4s": [["f", 0.9916], ["f", 0.9917]]},
+      {"audio": "master", "time": 49.477, "word": "fakhr / فخر", "phone": "f", "confidence": "high; initial unvoiced frication", "ctc_3p6s_and_0p4s": [["f", 0.9414], ["f", 0.9867]]},
+      {"audio": "master", "time": 22.43, "word": "feedback", "phone": "f", "confidence": "high; onset frication before the long ee vowel", "ctc_3p6s_and_0p4s": [["f", 0.9642], ["<pad>", 0.9918]]}
+    ],
+    "A": [
+      {"audio": "master", "time": 1.973, "word": "aaraam / آرام, second aa", "phone": "aː", "confidence": "high; strong wide-open low vowel center", "ctc_3p6s_and_0p4s": [["a", 0.8957], ["a", 0.8908]], "formants_hz": [988, 1439, 3211]},
+      {"audio": "master", "time": 5.025, "word": "kahaa / کہا, final aa", "phone": "aː", "confidence": "high; open final vowel", "ctc_3p6s_and_0p4s": [["a", 0.8943], ["a", 0.8986]], "formants_hz": [936, 1553, 2997]},
+      {"audio": "master", "time": 16.715, "word": "baat / بات", "phone": "aː", "confidence": "high; long vowel between b and t", "ctc_3p6s_and_0p4s": [["a", 0.7827], ["aː", 0.4902]], "formants_hz": [972, 1445, 3146]}
+    ],
+    "E": [
+      {"audio": "master", "time": 13.895, "word": "aise / ایسے, final e", "phone": "eː", "confidence": "high; voiced front-mid vowel after s", "acoustic_dwell_seconds": [13.873, 13.913], "ctc_3p6s_and_0p4s": [["e", 0.8924], ["e", 0.9094]], "formants_hz": [442, 1965, 2916]},
+      {"audio": "master", "time": 2.205, "word": "se / سے", "phone": "eː", "confidence": "high; voiced front-mid vowel after s", "acoustic_dwell_seconds": [2.185, 2.228], "ctc_3p6s_and_0p4s": [["e", 0.6997], ["e", 0.7818]], "formants_hz": [477, 1891, 2345]},
+      {"audio": "master", "time": 36.331, "word": "se / سے", "phone": "eː", "confidence": "high; two window peaks agree within 20 ms", "acoustic_dwell_seconds": [36.312, 36.352], "ctc_3p6s_and_0p4s": [["e", 0.8817], ["<pad>", 0.9989]], "formants_hz": [480, 1989, 2868]},
+      {"audio": "master", "time": 13.876, "word": "aise / ایسے, final e", "phone": "eː", "confidence": "high; voiced front-mid vowel after s", "acoustic_dwell_seconds": [13.873, 13.913], "ctc_3p6s_and_0p4s": [["e", 0.8924], ["e", 0.9094]], "formants_hz": [442, 1965, 2916]},
+      {"audio": "master", "time": 13.91, "word": "aise / ایسے, final e", "phone": "eː", "confidence": "high; voiced front-mid vowel after s", "acoustic_dwell_seconds": [13.873, 13.913], "ctc_3p6s_and_0p4s": [["e", 0.8924], ["e", 0.9094]], "formants_hz": [442, 1965, 2916]},
+      {"audio": "master", "time": 2.188, "word": "se / سے", "phone": "eː", "confidence": "high; voiced front-mid vowel after s", "acoustic_dwell_seconds": [2.185, 2.228], "ctc_3p6s_and_0p4s": [["e", 0.6997], ["e", 0.7818]], "formants_hz": [477, 1891, 2345]},
+      {"audio": "master", "time": 2.225, "word": "se / سے", "phone": "eː", "confidence": "high; voiced front-mid vowel after s", "acoustic_dwell_seconds": [2.185, 2.228], "ctc_3p6s_and_0p4s": [["e", 0.6997], ["e", 0.7818]], "formants_hz": [477, 1891, 2345]},
+      {"audio": "master", "time": 36.315, "word": "se / سے", "phone": "eː", "confidence": "high; two window peaks agree within 20 ms", "acoustic_dwell_seconds": [36.312, 36.352], "ctc_3p6s_and_0p4s": [["e", 0.8817], ["<pad>", 0.9989]], "formants_hz": [480, 1989, 2868]},
+      {"audio": "master", "time": 36.349, "word": "se / سے", "phone": "eː", "confidence": "high; two window peaks agree within 20 ms", "acoustic_dwell_seconds": [36.312, 36.352], "ctc_3p6s_and_0p4s": [["e", 0.8817], ["<pad>", 0.9989]], "formants_hz": [480, 1989, 2868]},
+      {"audio": "master", "time": 33.349, "word": "ge in poochho ge", "phone": "eː", "confidence": "Lexical and sustained native 10ms pitch/formant trace within this vowel", "acoustic_dwell_seconds": [33.344, 33.405], "formant_range_hz": [[360, 455], [1890, 2310]]},
+      {"audio": "master", "time": 33.3745, "word": "ge in poochho ge", "phone": "eː", "confidence": "Lexical and sustained native 10ms pitch/formant trace within this vowel", "acoustic_dwell_seconds": [33.344, 33.405], "formant_range_hz": [[360, 455], [1890, 2310]]},
+      {"audio": "master", "time": 33.401, "word": "ge in poochho ge", "phone": "eː", "confidence": "Lexical and sustained native 10ms pitch/formant trace within this vowel", "acoustic_dwell_seconds": [33.344, 33.405], "formant_range_hz": [[360, 455], [1890, 2310]]}
+    ],
+    "I": [
+      {"audio": "master", "time": 22.535, "word": "feedback, first vowel", "phone": "iː", "confidence": "high; sustained high front vowel", "acoustic_dwell_seconds": [22.475, 22.56], "ctc_3p6s_and_0p4s": [["iː", 0.7162], ["iː", 0.7755]], "formants_hz": [273, 2573, 2928]},
+      {"audio": "master", "time": 35.77, "word": "baaqi / باقی, final ee", "phone": "iː", "confidence": "high; stable high front vowel", "acoustic_dwell_seconds": [35.748, 35.805], "ctc_3p6s_and_0p4s": [["i", 0.8952], ["i", 0.866]], "formants_hz": [431, 2519, 2985]},
+      {"audio": "master", "time": 36.716, "word": "hi / ہی", "phone": "iː", "confidence": "high; voiced high front vowel", "ctc_3p6s_and_0p4s": [["i", 0.9029], ["i", 0.8578]], "formants_hz": [321, 2431, 2984]},
+      {"audio": "master", "time": 22.478, "word": "feedback, first vowel", "phone": "iː", "confidence": "high; sustained high front vowel", "acoustic_dwell_seconds": [22.475, 22.56], "ctc_3p6s_and_0p4s": [["iː", 0.7162], ["iː", 0.7755]], "formants_hz": [273, 2573, 2928]},
+      {"audio": "master", "time": 22.557, "word": "feedback, first vowel", "phone": "iː", "confidence": "high; sustained high front vowel", "acoustic_dwell_seconds": [22.475, 22.56], "ctc_3p6s_and_0p4s": [["iː", 0.7162], ["iː", 0.7755]], "formants_hz": [273, 2573, 2928]},
+      {"audio": "master", "time": 35.751, "word": "baaqi / باقی, final ee", "phone": "iː", "confidence": "high; stable high front vowel", "acoustic_dwell_seconds": [35.748, 35.805], "ctc_3p6s_and_0p4s": [["i", 0.8952], ["i", 0.866]], "formants_hz": [431, 2519, 2985]},
+      {"audio": "master", "time": 35.802, "word": "baaqi / باقی, final ee", "phone": "iː", "confidence": "high; stable high front vowel", "acoustic_dwell_seconds": [35.748, 35.805], "ctc_3p6s_and_0p4s": [["i", 0.8952], ["i", 0.866]], "formants_hz": [431, 2519, 2985]}
+    ],
+    "O": [
+      {"audio": "master", "time": 47.546, "word": "woh / وہ", "phone": "oː", "confidence": "high; strong low F2 and moderate F1, after initial v", "acoustic_dwell_seconds": [47.501, 47.578], "ctc_3p6s_and_0p4s": [["oː", 0.5978], ["oː", 0.4268]], "formants_hz": [476, 842, 3338]},
+      {"audio": "master", "time": 6.255, "word": "kholte / کھولتے", "phone": "oː", "confidence": "high; sustained moderate F1/low F2", "acoustic_dwell_seconds": [6.232, 6.294], "ctc_3p6s_and_0p4s": [["o", 0.6224], ["ɔ", 0.1876]], "formants_hz": [452, 989, 2982]},
+      {"audio": "master", "time": 33.244, "word": "poochho / پوچھو, final o", "phone": "oː", "confidence": "high; between chh and g of ge", "acoustic_dwell_seconds": [33.225, 33.272], "ctc_3p6s_and_0p4s": [["o", 0.9437], ["ou5", 0.23]], "formants_hz": [403, 1051, 2991]},
+      {"audio": "master", "time": 47.504, "word": "woh / وہ", "phone": "oː", "confidence": "high; strong low F2 and moderate F1, after initial v", "acoustic_dwell_seconds": [47.501, 47.578], "ctc_3p6s_and_0p4s": [["oː", 0.5978], ["oː", 0.4268]], "formants_hz": [476, 842, 3338]},
+      {"audio": "master", "time": 47.575, "word": "woh / وہ", "phone": "oː", "confidence": "high; strong low F2 and moderate F1, after initial v", "acoustic_dwell_seconds": [47.501, 47.578], "ctc_3p6s_and_0p4s": [["oː", 0.5978], ["oː", 0.4268]], "formants_hz": [476, 842, 3338]},
+      {"audio": "master", "time": 6.235, "word": "kholte / کھولتے", "phone": "oː", "confidence": "high; sustained moderate F1/low F2", "acoustic_dwell_seconds": [6.232, 6.294], "ctc_3p6s_and_0p4s": [["o", 0.6224], ["ɔ", 0.1876]], "formants_hz": [452, 989, 2982]},
+      {"audio": "master", "time": 6.291, "word": "kholte / کھولتے", "phone": "oː", "confidence": "high; sustained moderate F1/low F2", "acoustic_dwell_seconds": [6.232, 6.294], "ctc_3p6s_and_0p4s": [["o", 0.6224], ["ɔ", 0.1876]], "formants_hz": [452, 989, 2982]},
+      {"audio": "master", "time": 33.228, "word": "poochho / پوچھو, final o", "phone": "oː", "confidence": "high; between chh and g of ge", "acoustic_dwell_seconds": [33.225, 33.272], "ctc_3p6s_and_0p4s": [["o", 0.9437], ["ou5", 0.23]], "formants_hz": [403, 1051, 2991]},
+      {"audio": "master", "time": 33.269, "word": "poochho / پوچھو, final o", "phone": "oː", "confidence": "high; between chh and g of ge", "acoustic_dwell_seconds": [33.225, 33.272], "ctc_3p6s_and_0p4s": [["o", 0.9437], ["ou5", 0.23]], "formants_hz": [403, 1051, 2991]},
+      {"audio": "master", "time": 16.02, "word": "lo / لو", "phone": "oː", "confidence": "Lexical and sustained native 10ms pitch/formant trace within this vowel", "acoustic_dwell_seconds": [16.015, 16.085], "formant_range_hz": [[400, 400], [850, 1050]]},
+      {"audio": "master", "time": 16.05, "word": "lo / لو", "phone": "oː", "confidence": "Lexical and sustained native 10ms pitch/formant trace within this vowel", "acoustic_dwell_seconds": [16.015, 16.085], "formant_range_hz": [[400, 400], [850, 1050]]},
+      {"audio": "master", "time": 16.081, "word": "lo / لو", "phone": "oː", "confidence": "Lexical and sustained native 10ms pitch/formant trace within this vowel", "acoustic_dwell_seconds": [16.015, 16.085], "formant_range_hz": [[400, 400], [850, 1050]]}
+    ],
+    "U": [
+      {"audio": "master", "time": 12.648, "word": "poochh / پوچھ", "phone": "uː", "confidence": "high; high back rounded vowel between p and chh", "acoustic_dwell_seconds": [12.625, 12.67], "ctc_3p6s_and_0p4s": [["uː", 0.4136], ["uː", 0.4717]], "formants_hz": [333, 879, 2690]},
+      {"audio": "master", "time": 33.059, "word": "poochho / پوچھو, first vowel", "phone": "uː", "confidence": "high; stable high back vowel and matching CTC within 20ms", "acoustic_dwell_seconds": [33.03, 33.08], "ctc_3p6s_and_0p4s": [["u", 0.8398], ["<pad>", 0.9999]], "formants_hz": [314, 957, 2967]},
+      {"audio": "master", "time": 9.147, "word": "shuru / شروع, final oo", "phone": "uː", "confidence": "high; high back vowel immediately after r", "acoustic_dwell_seconds": [9.125, 9.165], "ctc_3p6s_and_0p4s": [["u", 0.6583], ["u", 0.6929]], "formants_hz": [376, 1095, 2679]},
+      {"audio": "master", "time": 12.628, "word": "poochh / پوچھ", "phone": "uː", "confidence": "high; high back rounded vowel between p and chh", "acoustic_dwell_seconds": [12.625, 12.67], "ctc_3p6s_and_0p4s": [["uː", 0.4136], ["uː", 0.4717]], "formants_hz": [333, 879, 2690]},
+      {"audio": "master", "time": 12.667, "word": "poochh / پوچھ", "phone": "uː", "confidence": "high; high back rounded vowel between p and chh", "acoustic_dwell_seconds": [12.625, 12.67], "ctc_3p6s_and_0p4s": [["uː", 0.4136], ["uː", 0.4717]], "formants_hz": [333, 879, 2690]},
+      {"audio": "master", "time": 33.033, "word": "poochho / پوچھو, first vowel", "phone": "uː", "confidence": "high; stable high back vowel and matching CTC within 20ms", "acoustic_dwell_seconds": [33.03, 33.08], "ctc_3p6s_and_0p4s": [["u", 0.8398], ["<pad>", 0.9999]], "formants_hz": [314, 957, 2967]},
+      {"audio": "master", "time": 33.077, "word": "poochho / پوچھو, first vowel", "phone": "uː", "confidence": "high; stable high back vowel and matching CTC within 20ms", "acoustic_dwell_seconds": [33.03, 33.08], "ctc_3p6s_and_0p4s": [["u", 0.8398], ["<pad>", 0.9999]], "formants_hz": [314, 957, 2967]},
+      {"audio": "master", "time": 9.128, "word": "shuru / شروع, final oo", "phone": "uː", "confidence": "high; high back vowel immediately after r", "acoustic_dwell_seconds": [9.125, 9.165], "ctc_3p6s_and_0p4s": [["u", 0.6583], ["u", 0.6929]], "formants_hz": [376, 1095, 2679]},
+      {"audio": "master", "time": 9.162, "word": "shuru / شروع, final oo", "phone": "uː", "confidence": "high; high back vowel immediately after r", "acoustic_dwell_seconds": [9.125, 9.165], "ctc_3p6s_and_0p4s": [["u", 0.6583], ["u", 0.6929]], "formants_hz": [376, 1095, 2679]}
+    ],
+    "S": [
+      {"audio": "master", "time": 42.95, "word": "sun / سن", "phone": "s", "confidence": "high; sustained unvoiced sibilance", "ctc_3p6s_and_0p4s": [["s", 0.9777], ["s", 0.9751]]},
+      {"audio": "master", "time": 0.615, "word": "sun / سن", "phone": "s", "confidence": "high; sustained unvoiced sibilance", "ctc_3p6s_and_0p4s": [["s", 0.9702], ["s", 0.9877]]},
+      {"audio": "master", "time": 24.839, "word": "si / سی", "phone": "s", "confidence": "high; unvoiced frication before ee", "ctc_3p6s_and_0p4s": [["s", 0.98], ["s", 0.9705]]}
+    ],
+    "neutral": [
+      {"audio": "master", "time": 2.301, "word": "bataao / بتاؤ, first vowel", "phone": "ə", "confidence": "moderate-high; primary window predicts schwa; short-window label a; central F1/F2", "ctc_3p6s_and_0p4s": [["ə", 0.551], ["a", 0.3138]], "formants_hz": [533, 1594, 3088]},
+      {"audio": "master", "time": 17.206, "word": "karo / کرو, first vowel", "phone": "ə", "confidence": "moderate-high; short central vowel, both model contexts transcribe a", "ctc_3p6s_and_0p4s": [["a", 0.7206], ["a", 0.8185]], "formants_hz": [519, 1597, 2880]},
+      {"audio": "master", "time": 8.474, "word": "jab / جب", "phone": "ə", "confidence": "moderate; crosslingual recognizer says a; actual formants central, before b closure", "ctc_3p6s_and_0p4s": [["a", 0.9306], ["a", 0.8533]], "formants_hz": [550, 1581, 2790]}
+    ]
+  }
+}
