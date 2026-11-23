@@ -51,6 +51,20 @@ page.on("dialog", (dialog) => {
   dialog.dismiss().catch(() => {});
 });
 
+// RELAY=turn:127.0.0.1:3478,user,password (with REAL_CALL=1): send the call through a relay on
+// this machine. For a box whose network Chrome does not list: it then finds no way out and the
+// call never connects, although the machine itself reaches the voice model.
+if (process.env.RELAY) {
+  const [urls, username, credential] = process.env.RELAY.split(",");
+  await page.addInitScript((server) => {
+    const Native = window.RTCPeerConnection;
+    window.RTCPeerConnection = function (config, ...rest) {
+      return new Native({ ...(config || {}), iceServers: [server], iceTransportPolicy: "relay" }, ...rest);
+    };
+    window.RTCPeerConnection.prototype = Native.prototype;
+  }, { urls, username, credential });
+}
+
 if (!real) await page.addInitScript(({ VOICE }) => {
   const real = window.fetch.bind(window);
   window.fetch = async (input, init) => {
