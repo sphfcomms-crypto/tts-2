@@ -15,8 +15,15 @@ import { gpuKey } from "./avatarGpu";
 const FILE = path.join(os.tmpdir(), "tts-avatar-flash.json");
 const ALLOWED_HOST = /^[a-z0-9-]+\.trycloudflare\.com$/;
 
-type Health = { ok: boolean; slice_frames?: number; look_frames?: number; fps?: number };
-export type FlashAccess = { url: string; token: string; sliceFrames: number; lookFrames: number; fps: number };
+type Health = { ok: boolean; slice_frames?: number; look_frames?: number; fps?: number; work_seconds?: number };
+export type FlashAccess = {
+  url: string;
+  token: string;
+  sliceFrames: number;
+  lookFrames: number;
+  fps: number;
+  workSeconds: number; // what drawing one slice costs the server; 0 when it does not say
+};
 
 let address: string | null = null; // null: not read from disk yet
 let cached: { at: number; value: Health | null } | null = null;
@@ -106,5 +113,6 @@ export async function flashAccess(): Promise<FlashAccess | null> {
     sliceFrames: status.slice_frames!,
     lookFrames: status.look_frames ?? 0,
     fps: status.fps!,
+    workSeconds: status.work_seconds && status.work_seconds > 0 ? status.work_seconds : 0,
   };
 }

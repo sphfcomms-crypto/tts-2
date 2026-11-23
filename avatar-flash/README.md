@@ -20,7 +20,7 @@ run inside a call. This one keeps up with her voice on one rented GPU.
   - the square is drawn at 416 pixels instead of 512 (`FLASH_SIZE`). It is shown 300 pixels wide
     in the 960x720 frame.
   - the model's latents are turned into pictures by TAEHV (`taew2_1`, github.com/madebyollin/taehv,
-    MIT), a decoder of 45 MB, instead of the full Wan decoder: 0.07 s a pass against 1.26 s. Its
+    MIT), a decoder of 22 MB, instead of the full Wan decoder: 0.07 s a pass against 1.26 s. Its
     colours are fitted to the full decoder's once at start (a 3x4 matrix; what is left differs by
     1 part in 255).
 - **Her picture:** one still, 4:3, mouth closed (`inputs/start.jpg`, 1664x1248). The model draws

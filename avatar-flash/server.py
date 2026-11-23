@@ -238,6 +238,7 @@ class Engine:
         self.sessions = {}
         self.gpu = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gpu")
         self.last = None
+        self.work = 0.0                  # seconds of work for one slice, as lately measured
         self.count = 0
         self.started = time.time()
         self.load_seconds = time.perf_counter() - t0
@@ -340,10 +341,14 @@ class Engine:
         self.rest = None
         session = Session(self.cached, self.ref_motion)
         for i in range(max(1, round(4.0 * FPS / self.slice))):
+            t0 = time.perf_counter()
             self.draw(session, np.zeros(self.slice * PER_FRAME, np.float32))
+            torch.cuda.synchronize()
+            # What one slice costs here: the page holds her voice back by that much from the
+            # first slice of a call on, instead of finding it out from slices that came late.
+            self.work = time.perf_counter() - t0
             if TAE and i == 1:
                 self.fit_colour()
-        torch.cuda.synchronize()
         self.rest = (session.motion.clone(), list(session.sound))
 
     def session(self, sid, fresh):
@@ -460,7 +465,7 @@ def _startup():
 def health():
     e = ENGINE
     return {"ok": True, "model": f"SoulX-FlashHead {MODEL}, {STEPS} steps" + (", TAEHV" if TAE else ""), "fps": FPS, "slice_frames": e.slice, "look_frames": LOOK,
-            "width": OUT_W, "height": OUT_H, "speed": e.last, "requests": e.count, "sessions": len(e.sessions),
+            "width": OUT_W, "height": OUT_H, "work_seconds": round(e.work, 3), "speed": e.last, "requests": e.count, "sessions": len(e.sessions),
             "uptime_seconds": round(time.time() - e.started), "idle_seconds": round(time.time() - LAST_USED)}
 
 
@@ -515,6 +520,7 @@ async def say(request: Request, sid: str = "", seq: int = 0):
     ms["total"] = round(1e3 * total, 1)
     e.last = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "frames": e.slice, "bytes": len(data), "ms": ms,
               "seconds_per_second_of_speech": round(total / (e.slice / FPS), 3)}
+    e.work = 0.8 * e.work + 0.2 * (total - waited) if e.work else total - waited
     e.count += 1
     if seq % 10 == 0:
         log(event="say", sid=sid[:8], seq=seq, **e.last)

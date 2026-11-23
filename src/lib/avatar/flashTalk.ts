@@ -74,7 +74,12 @@ export class FlashTalk {
       this.slice = flash.sliceFrames / flash.fps;
       this.look = flash.lookFrames / flash.fps;
     }
-    this.hold = holdFor([], this.slice + this.look, MIN_HOLD, MAX_HOLD);
+    // Before any slice has come back, go by what the server says one costs it,
+    // plus the way there and back. Without this the first slices of a call
+    // came late and the picture flickered between the clip and the stream.
+    const work = flash?.workSeconds ?? 0;
+    const expected = work > 0 ? [this.slice + this.look + work + 0.1] : [];
+    this.hold = holdFor(expected, this.slice + this.look, MIN_HOLD, MAX_HOLD);
   }
 
   async start() {

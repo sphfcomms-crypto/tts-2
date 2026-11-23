@@ -52,7 +52,7 @@ if [ "$(cat "$P/built" 2>/dev/null)" != "$NOW" ]; then
   echo "$NOW" > "$P/built"
 fi
 
-if ! curl -fsS -m 2 -o /dev/null "http://127.0.0.1:$PORT/"; then
+if ! curl -fsS -m 2 -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; then
   say "starting the app"
   TTS_UPSTREAM="$UPSTREAM" AVATAR_GPU_KEY="$KEY" NODE_ENV=production setsid nohup npx next start -p "$PORT" > "$P/app.log" 2>&1 < /dev/null &
   echo $! > "$P/app.pid"
@@ -64,8 +64,8 @@ if ! { [ -f "$P/tunnel.pid" ] && kill -0 "$(cat "$P/tunnel.pid")" 2>/dev/null &&
   setsid nohup cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$PORT" >> "$P/tunnel.log" 2>&1 < /dev/null &
   echo $! > "$P/tunnel.pid"
 fi
-for i in $(seq 1 60); do curl -fsS -m 2 -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 1; done
-curl -fsS -m 2 -o /dev/null "http://127.0.0.1:$PORT/" || { say "the app did not start:"; tail -5 "$P/app.log"; exit 1; }
+for i in $(seq 1 60); do curl -fsS -m 2 -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null && break; sleep 1; done
+curl -fsS -m 2 -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null || { say "the app did not start:"; tail -5 "$P/app.log"; exit 1; }
 URL=""; for i in $(seq 1 60); do URL="$(url)"; [ -n "$URL" ] && break; sleep 1; done
 [ -n "$URL" ] || { say "no link, see $P/tunnel.log"; exit 1; }
 

@@ -50,7 +50,7 @@ step "model weights (15 GB)"
 [ -d models/SoulX-FlashHead-1_3B/Model_Lite ] || $E/venv/bin/huggingface-cli download Soul-AILab/SoulX-FlashHead-1_3B --local-dir models/SoulX-FlashHead-1_3B | tail -1
 [ -f models/wav2vec2-base-960h/config.json ] || $E/venv/bin/huggingface-cli download facebook/wav2vec2-base-960h --local-dir models/wav2vec2-base-960h | tail -1
 
-step "the small decoder (TAEHV for Wan 2.1 latents, MIT licence, 45 MB)"
+step "the small decoder (TAEHV for Wan 2.1 latents, MIT licence, 22 MB)"
 [ -s models/taehv/taehv.py ] || curl -fsSL -o models/taehv/taehv.py https://raw.githubusercontent.com/madebyollin/taehv/main/taehv.py
 [ -s models/taehv/taew2_1.pth ] || curl -fsSL -o models/taehv/taew2_1.pth https://github.com/madebyollin/taehv/raw/main/taew2_1.pth
 [ -s models/taehv/taew2_1.pth ] || echo "could not fetch the small decoder: start the server with FLASH_TAE=0 (it then needs a GPU about twice as fast)"
