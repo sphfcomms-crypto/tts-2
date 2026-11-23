@@ -1,0 +1,24 @@
+[Unit]
+Description=Local photo-real call renderer
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=tts-avatar
+Group=tts-avatar
+WorkingDirectory=/opt/tts/performance-cpu
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=OMP_NUM_THREADS=1
+EnvironmentFile=/etc/tts-avatar-cpu.env
+ExecStart=/opt/tts/performance-cpu/venv/bin/python /opt/tts/performance-cpu/server.py
+Restart=on-failure
+RestartSec=8
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/tts/performance-data/cache
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
