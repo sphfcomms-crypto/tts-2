@@ -100,23 +100,26 @@ bash home.sh https://<a running copy of the app>      # last line: APP_URL=https
 bash home.sh --stop
 ```
 
-The same thing on a machine of your own, with nothing rented: one NVIDIA card about as fast as an
-RTX 4080 or better with 12 GB or more, on Linux or on Ubuntu under WSL2. Everything goes under
+The same thing on a machine of your own, with nothing rented: one NVIDIA card with 12 GB or more,
+on Linux or on Ubuntu under WSL2 (the faster the card, the larger and sharper she is drawn). Everything goes under
 `~/tts-2-lab` (27 GB; ten minutes the first time). It checks the card, the disk and that the other
 copy of the app answers, then runs `preview.sh` below. The link works from any phone for as long
 as the machine and the program run.
 
 `start.sh` draws her at the largest size this card keeps up with: it starts at 416 pixels, reads
-from `/health` how long one slice takes, and goes down to 384, 352 and 320 while the GPU would be
-busy more than nine tenths of the time (`FLASH_SIZES`, `FLASH_BUSY_MOST`; `FLASH_SIZE` fixes one
-size). `setup.sh` tries flash-attention on the card once and leaves it out where it does not run
+from `/health` how busy the GPU would be in a call, and while that is more than nine tenths of
+the time goes straight to the size at which it should be 0.85 (the work grows with the square of
+the size), down to 256 at the least (`FLASH_SIZE_MOST`, `FLASH_SIZE_LEAST`, `FLASH_BUSY_MOST`;
+`FLASH_SIZE` fixes one size). To have it choose again: `bash stop.sh`, then start.
+
+On an RTX 5070 Ti (Ubuntu under WSL2, 2026-11-23) the build and the server ran as they are. The
+server reported the GPU busy 1.93 of the time, too slow for a call: that is what the choice of
+size above is for. How she looks below 384 pixels has not been judged yet. `setup.sh` tries flash-attention on the card once and leaves it out where it does not run
 (a card newer than the package): the model then uses PyTorch's own attention.
 
 Several cards help one call only inside one machine (the model can split a pass across them, see
 `inference_script_multi_gpu_pro.sh` in its repository; not set up here). Cards in different
 machines cannot share a call: each pass sends gigabytes between them.
-
-Not run yet on anything but a rented L40S.
 
 ### Trying a branch before it is deployed
 
