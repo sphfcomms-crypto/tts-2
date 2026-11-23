@@ -36,7 +36,7 @@ export function LiveCall() {
   const live = call.status === "live";
 
   return (
-    <Block title="Live call">
+    <Block title="Live call" className="md:order-1">
       <div className="flex flex-col md:flex-row gap-3">
         <div className="md:w-[220px] shrink-0">
           <Button

@@ -9,6 +9,7 @@ type Tab = {
 
 interface BlockProps {
   title: string;
+  className?: string;
   tabs?: Tab[];
   value?: string;
   onChange?: (nextTab: string) => void;
@@ -21,13 +22,14 @@ interface TabChildProps {
 
 export const Block: React.FC<BlockProps> = ({
   title,
+  className,
   tabs,
   value,
   onChange,
   children,
 }) => {
   return (
-    <div className="flex flex-1 flex-col shrink-0 mb-10">
+    <div className={clsx("flex flex-1 flex-col shrink-0 mb-10", className)}>
       <div className="flex flex-row justify-between -mb-[1px] relative items-center gap-2">
         <div className="flex uppercase py-1 text-current/70">{title}</div>
         <div className="flex flex-1 h-[1px] bg-foreground/8" />

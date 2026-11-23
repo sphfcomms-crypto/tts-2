@@ -187,8 +187,9 @@ const Board = () => {
   };
 
   return (
-    <main className="flex-1 flex flex-col gap-x-3 w-full max-w-(--page-max-width) mx-auto">
+    <main className="flex-1 flex flex-col [reading-flow:flex-visual] gap-x-3 w-full max-w-(--page-max-width) mx-auto">
       {showAvatar && <AvatarPanel />}
+      <LiveCall />
       <Block title="Script">
         <div className="relative flex flex-col h-full w-full">
           <textarea
@@ -269,8 +270,7 @@ const Board = () => {
           </span>
         </div>
       </Block>
-      <LiveCall />
-      {showEngines && <EngineStatus />}
+      {showEngines && <div className="md:order-2"><EngineStatus /></div>}
     </main>
   );
 };
