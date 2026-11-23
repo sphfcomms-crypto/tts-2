@@ -36,3 +36,33 @@ only the periods covered by joined pieces. None of these measures grades pronunc
 `analyze.py` needs `template.png` (her eyes and nose, cut from a recording) to find her face; it
 makes one from picture 300 of the first recording it is run on. A call needs a 48 kHz mono WAV:
 ten seconds of silence, a question, then silence.
+
+## Her mouth against a reference clip
+
+The tools above say whether the lip video arrived and sat in the right place. These two say what
+her mouth did, in any video file: a recording of the live page, a clip from the GPU box, or a
+clip from an offline video model that is used as the target.
+
+    pip install mediapipe==0.10.21 opencv-python-headless soundfile    # Python 3.11 or 3.12
+    python mouth_track.py reference.mp4 reference.json
+    ffmpeg -i reference.mp4 -ac 1 reference.wav
+    python mouth_stats.py reference.json reference.wav
+
+`mouth_track.py` finds her face in every picture (MediaPipe Face Mesh on an enlarged crop of her
+head) and writes how far her lips are apart, how wide her mouth is, her jaw, brows, eyelids and
+head position. Every length is in units of the distance between her outer eye corners, so a
+1664x1248 clip and a 960x720 one compare. `mouth_stats.py` turns that into a few numbers and, with
+the sound, the delay at which her mouth follows the loudness of her voice best.
+
+The target on 2026-11-23 is an eleven-second Seedance 2.5 clip of her saying a line in the app's
+own voice (made on OpenArt from that recording; a clip takes that model about four minutes):
+
+| | Seedance 2.5 target | `oa1_talk_explain` (filmed talking, silent) | `talk_open` (mouth closed) |
+|---|---|---|---|
+| lips apart, median / 95th percentile | 0.09 / 0.21 | 0.12 / 0.21 | 0.00 / 0.00 |
+| mouth width, 5th to 95th percentile | 0.31 to 0.61 | 0.31 to 0.66 | 0.49 to 0.54 |
+| blinks | 8 in 10.8 s | 4 in 5.4 s | 5 in 4.8 s |
+
+In the target her mouth opens about a quarter of a second before each phrase is heard (she breathes
+in and shapes the first sound), her eyes close on most phrase starts, and her whole face moves with
+the words. Measure a recording of a live call the same way to see how far it is from that.
