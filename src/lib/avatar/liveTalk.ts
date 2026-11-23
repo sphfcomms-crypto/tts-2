@@ -151,7 +151,7 @@ const withCapture = new WeakSet<AudioContext>();
 
 // Silent video pieces joined end to end. Nothing plays by itself: the
 // caller moves the picture.
-class Reel {
+export class Reel {
   private buffer: SourceBuffer | null = null;
   private url = "";
   private end = 0;
@@ -988,7 +988,7 @@ function device(video: HTMLVideoElement) {
 // only (how many pieces, how late, how much of her speech had lips). It is
 // written to the server's log, so a device on which she does not work can
 // be understood without anyone having to describe what they saw.
-export function report(kind: string, face: LiveTalk) {
+export function report(kind: string, face: { describe(): Record<string, unknown> }) {
   send({ kind, ...face.describe() });
 }
 
