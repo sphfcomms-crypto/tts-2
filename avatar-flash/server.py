@@ -11,6 +11,8 @@ API     GET  /health
         POST /say?sid=<session>&seq=<n>[&t=<token>]    body: WAV, one slice of her voice
         GET  /idle.mp4[?t=<token>]   her listening quietly, a loop (FLASH_OWN_LOOK=1 only)
         GET  /still.jpg[?t=<token>]  her picture at the size the frames are sent
+        GET  /live, POST /tts?t=<token>   the page for reading texts aloud and her voice from text
+                                          (FLASH_LIVE_PAGE=1 only, a server no one else can reach: live.sh)
         Every request needs the header x-avatar-key or, from a browser, a signed token (the same
         scheme as avatar-gpu/server.py).
 Run     bash start.sh   (listens on 127.0.0.1:8100)
@@ -26,6 +28,7 @@ import hmac
 import io
 import json
 import os
+import re
 import struct
 import sys
 import threading
@@ -100,6 +103,11 @@ OWN_LOOK = os.environ.get("FLASH_OWN_LOOK", "0") == "1"
 IDLE_SECONDS = float(os.environ.get("FLASH_IDLE_SECONDS", "6"))
 # Laid over her by the page, for a look that needs it. "news": a LIVE badge and the viewer's own time.
 BADGE = os.environ.get("FLASH_BADGE", "")
+# The page for reading texts aloud on this machine (live.sh): GET /live, with a token for this
+# server in it, and POST /tts, her voice made from text (edge-tts). Only for a server no one else
+# can reach: live.sh starts it without a tunnel.
+LIVE_PAGE = os.environ.get("FLASH_LIVE_PAGE", "0") == "1"
+LIVE_HTML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "live.html")
 MAX_SESSIONS = int(os.environ.get("FLASH_MAX_SESSIONS", "3"))
 SESSION_IDLE = float(os.environ.get("FLASH_SESSION_IDLE", "45"))
 KEY_FILE = os.environ.get("FLASH_KEY_FILE", os.path.join(ROOT, "key.txt"))
@@ -454,7 +462,9 @@ CORS = [(b"access-control-allow-origin", b"*"),
         (b"access-control-max-age", b"600")]
 TOKEN_MAX_SECONDS = 2 * 3600
 # What a browser may ask for with the signed token instead of the key.
-TOKEN_PATHS = {("POST", "/say"), ("GET", "/idle.mp4"), ("GET", "/still.jpg")}
+TOKEN_PATHS = {("POST", "/say"), ("GET", "/idle.mp4"), ("GET", "/still.jpg"), ("GET", "/health"), ("POST", "/tts")}
+# Asked for with no key at all: the live page and a fresh token for it (FLASH_LIVE_PAGE=1 only).
+OPEN_PATHS = {("GET", "/live"), ("GET", "/live/token")} if LIVE_PAGE else set()
 
 
 def token_ok(query):
@@ -496,6 +506,8 @@ class KeyGate:
 
         if scope["method"] == "OPTIONS":
             return await answer(204)
+        if (scope["method"], scope["path"]) in OPEN_PATHS:
+            return await self.inner(scope, receive, send)
         if not ((scope["method"], scope["path"]) in TOKEN_PATHS and token_ok(scope.get("query_string", b""))):
             return await answer(401, b'{"ok":false,"error":"unauthorized"}')
 
@@ -524,6 +536,61 @@ def health():
             "width": OUT_W, "height": OUT_H, "square": [e.ox, e.oy, e.osize], "size": SIZE, "work_seconds": round(e.work, 3), "speed": e.last, "requests": e.count, "sessions": len(e.sessions),
             "own_look": OWN_LOOK, "idle_frames": e.idle_frames, "badge": BADGE,
             "uptime_seconds": round(time.time() - e.started), "idle_seconds": round(time.time() - LAST_USED)}
+
+
+def make_token():
+    """A token this server accepts (see token_ok), good for a little less than the longest allowed."""
+    expires = str(int(time.time()) + TOKEN_MAX_SECONDS - 120).encode()
+    return expires.decode() + "." + hmac.new(KEY, expires, hashlib.sha256).hexdigest()
+
+
+@app.get("/live")
+def live_page():
+    if not LIVE_PAGE:
+        return _err(404, "the live page is off (live.sh turns it on)")
+    with open(LIVE_HTML, encoding="utf-8") as f:
+        html = f.read().replace("__TOKEN__", make_token())
+    return Response(html, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/live/token")
+def live_token():
+    if not LIVE_PAGE:
+        return _err(404, "the live page is off (live.sh turns it on)")
+    return {"token": make_token()}
+
+
+@app.post("/tts")
+async def tts(request: Request):
+    """Her voice from text: {"text": ..., "voice": "ur-PK-UzmaNeural", "rate": "+0%"} -> MP3."""
+    if not LIVE_PAGE:
+        return _err(404, "the live page is off (live.sh turns it on)")
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return _err(400, "the body must be JSON")
+    text = str(body.get("text", "")).strip()[:20000]
+    voice = str(body.get("voice", "ur-PK-UzmaNeural"))
+    rate = str(body.get("rate", "+0%"))
+    if not text:
+        return _err(400, "no text")
+    if not re.fullmatch(r"[a-z]{2,3}-[A-Z]{2,4}-[A-Za-z]+Neural", voice) or not re.fullmatch(r"[+-][0-9]{1,2}%", rate):
+        return _err(400, "voice like ur-PK-UzmaNeural, rate like +0% or -10%")
+    try:
+        import edge_tts
+    except ImportError:
+        return _err(503, "edge-tts is not installed here (live.sh installs it)")
+    out = io.BytesIO()
+    try:
+        async for chunk in edge_tts.Communicate(text, voice, rate=rate).stream():
+            if chunk.get("type") == "audio":
+                out.write(chunk["data"])
+    except Exception as ex:  # noqa: BLE001
+        log(event="tts_error", error=repr(ex))
+        return _err(502, f"her voice could not be made (edge-tts needs the internet): {ex}")
+    if not out.tell():
+        return _err(502, "no voice came back")
+    return Response(out.getvalue(), media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/idle.mp4")

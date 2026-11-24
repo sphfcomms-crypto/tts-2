@@ -75,8 +75,10 @@ if healthy; then say "server already running (bash stop.sh first to have its siz
   done
 fi
 url() { grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' logs/flash-tunnel.log 2>/dev/null | tail -1; }
-# FLASH_NO_TUNNEL=1: a server only this machine uses (render.sh): no tunnel, no registering.
+# FLASH_NO_TUNNEL=1: a server only this machine uses (render.sh): no tunnel, no registering. A
+# server with the live page (FLASH_LIVE_PAGE=1, live.sh) never gets one: its page hands out tokens.
 NO_TUNNEL="${FLASH_NO_TUNNEL:-0}"
+[ "${FLASH_LIVE_PAGE:-0}" = "1" ] && NO_TUNNEL=1
 if [ "$NO_TUNNEL" = "1" ]; then :; elif alive flash-tunnel cloudflared && [ -n "$(url)" ]; then say "tunnel already running"; else
   say "starting tunnel"
   : > logs/flash-tunnel.log

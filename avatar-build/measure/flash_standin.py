@@ -19,6 +19,11 @@ a real call, face and all, and can be looked at.
 
 With --own-look it stands in for a server with a look of its own (FLASH_OWN_LOOK=1): /health says
 so, and it serves the loop at /idle.mp4 and the picture at /still.jpg.
+
+    ... --live ../../avatar-flash/live.html --tts-file voice.wav
+
+With --live it serves the live page at /live (token "test"), and POST /tts answers with the
+--tts-file whatever the text, as the real server answers with her voice made from it.
 """
 import http.server
 import json
@@ -38,6 +43,7 @@ stats = {"slices": 0, "last_seq": -1, "out_of_order": 0}
 
 FILM = opt("--film", "")
 IDLE, STILL, BADGE = opt("--own-look", ""), opt("--still", ""), opt("--badge", "")
+LIVE, TTS_FILE = opt("--live", ""), opt("--tts-file", "")
 IDLE_FRAMES = 0
 if IDLE:
     IDLE_FRAMES = int(subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
@@ -120,6 +126,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "width": W, "height": H, "work_seconds": DELAY, **({"square": SQUARE} if FILM else {}), **stats,
                     "own_look": bool(IDLE), "idle_frames": IDLE_FRAMES, "badge": BADGE}
             return self.answer(200, json.dumps(body).encode(), "application/json")
+        if self.path.startswith("/live/token") and LIVE:
+            return self.answer(200, b'{"token": "test"}', "application/json")
+        if self.path.startswith("/live") and LIVE:
+            return self.answer(200, open(LIVE, encoding="utf-8").read().replace("__TOKEN__", "test").encode(), "text/html; charset=utf-8")
         if self.path.startswith("/idle.mp4") and IDLE:
             return self.answer(200, open(IDLE, "rb").read(), "video/mp4")
         if self.path.startswith("/still.jpg") and STILL:
@@ -129,6 +139,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.answer(404, b"{}", "application/json")
 
     def do_POST(self):
+        if self.path.startswith("/tts") and TTS_FILE:
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            return self.answer(200, open(TTS_FILE, "rb").read(), "audio/mpeg" if TTS_FILE.endswith(".mp3") else "audio/wav")
         if not self.path.startswith("/say"):
             return self.answer(404, b"{}", "application/json")
         began = time.time()

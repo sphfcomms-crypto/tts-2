@@ -160,6 +160,22 @@ mu-law, any rate, mono). Answer: `video/mp4`, `slice_frames` pictures, silent.
 - With `FLASH_AHEAD` above 0 the pictures of a slice show the sound from that many pictures
   earlier (`X-Lookahead-Frames`).
 
+## Reading what you type, live, on your own card (live.sh)
+
+    bash avatar-flash/live.sh              # then http://localhost:8100/live (opened for you under WSL)
+    FLASH_SIZE=416 bash avatar-flash/live.sh
+    bash avatar-flash/live.sh --stop
+
+It starts the server on this machine only (no tunnel, no OpenAI key, no rented GPU) with a page:
+type what she should say and press Speak. Her voice is made from the text with Microsoft's free
+neural voices (`edge-tts`, POST `/tts`; the internet is needed), or taken from a voice file, and
+her pictures are drawn one slice at a time. She starts speaking once enough is drawn that she will
+not have to stop: at once on a card faster than her voice, after a while on a slower one (on a card
+that takes 2.2 s per second of her, an 11 s line started after 20 s and ran without a stop). Her
+quiet loop shows meanwhile, with the LIVE mark and the time. If her pictures still fall behind, her
+voice waits for them. Untick "speak as soon as ready" to prepare texts and play each with its
+button. Her voice is played 50 ms before her pictures, as in a call (`?lipLag=<ms>` changes it).
+
 ## Finished films instead of a call (render.sh)
 
 For prepared texts (a news bulletin, a speech, meeting notes) she does not need to be drawn live:
