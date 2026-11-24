@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Bulletin</title>
+<!--
+  Plays the films render.sh made, as a live bulletin: her quiet loop (idle.mp4) runs all the time,
+  each item fades in over it while it plays, with a LIVE mark and the time of day on top.
+  Keys: Space or right arrow, the next item (or the one playing again from its start when it is
+  the last); left arrow, the one before; R, the current one again; A, all items in turn; F, full
+  screen; H, hide or show the item's title. A click anywhere is the same as Space.
+  The list comes from playlist.js (written by render.sh next to this file).
+-->
+<style>
+  :root { color-scheme: dark; --red: #d0021b; --navy: rgba(12, 28, 64, 0.88); }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #stage { position: absolute; inset: 0; margin: auto; width: min(100vw, calc(100vh * 4 / 3)); height: min(100vh, calc(100vw * 3 / 4)); background: #000; }
+  #stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #item { opacity: 0; transition: opacity 160ms linear; }
+  .live { position: absolute; left: 2.4%; top: 3.2%; background: var(--red); color: #fff; font-weight: 700; letter-spacing: 0.08em; padding: 0.18em 0.55em; border-radius: 3px; font-size: clamp(11px, 1.7vw, 22px); z-index: 3; }
+  .clock { position: absolute; right: 2.6%; top: 3.2%; color: #fff; font-weight: 600; font-size: clamp(12px, 1.9vw, 24px); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75); z-index: 3; }
+  .third { position: absolute; left: 0; right: 0; bottom: 6%; display: flex; justify-content: center; opacity: 0; transition: opacity 300ms; z-index: 3; pointer-events: none; }
+  .third span { background: var(--navy); color: #fff; padding: 0.35em 1.1em; font-size: clamp(12px, 2.1vw, 26px); border-left: 4px solid var(--red); max-width: 80%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .start { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: #fff; background: rgba(0, 0, 0, 0.55); font-size: clamp(15px, 2.6vw, 30px); cursor: pointer; z-index: 4; line-height: 1.5; }
+  .start small { display: block; font-size: 0.55em; color: #ccc; }
+  .empty { color: #f88; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="idle" muted loop playsinline preload="auto"></video>
+  <video id="item" playsinline preload="auto"></video>
+  <div class="live">LIVE</div>
+  <div class="clock" id="clock"></div>
+  <div class="third" id="third"><span id="title"></span></div>
+  <div class="start" id="start">
+    <div>Click to start<small>Space / &rarr; next &middot; &larr; previous &middot; R again &middot; A all &middot; F full screen &middot; H title</small></div>
+  </div>
+</div>
+<script src="playlist.js"></script>
+<script>
+  const items = Array.isArray(window.ITEMS) ? window.ITEMS : [];
+  const idle = document.getElementById("idle");
+  const item = document.getElementById("item");
+  const third = document.getElementById("third");
+  const title = document.getElementById("title");
+  const start = document.getElementById("start");
+  let at = -1;          // the item last started
+  let all = false;      // playing every item in turn
+  let titles = true;
+  let started = false;
+  let nextTimer = 0;
+
+  if (window.IDLE) idle.src = window.IDLE;
+  if (!items.length) start.innerHTML = '<div class="empty">No films found: run render.sh on this folder first.</div>';
+
+  const clock = () => {
+    document.getElementById("clock").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  };
+  clock();
+  setInterval(clock, 1000);
+
+  function play(index) {
+    if (!items.length) return;
+    window.clearTimeout(nextTimer);
+    at = Math.max(0, Math.min(items.length - 1, index));
+    const chosen = items[at];
+    item.style.opacity = 0;
+    third.style.opacity = 0;
+    item.src = chosen.file;
+    title.textContent = chosen.title || "";
+    item.play().catch(() => {});
+  }
+
+  // Her film shows only once its first picture is there, so nothing flashes black.
+  item.addEventListener("playing", () => {
+    item.style.opacity = 1;
+    third.style.opacity = titles && title.textContent ? 1 : 0;
+  });
+  item.addEventListener("ended", () => {
+    item.style.opacity = 0;
+    third.style.opacity = 0;
+    if (all && at + 1 < items.length) nextTimer = window.setTimeout(() => play(at + 1), 2500);
+    else all = false;
+  });
+
+  function begin() {
+    if (started) return;
+    started = true;
+    start.style.display = "none";
+    idle.play().catch(() => {});
+  }
+  function next() {
+    if (!started) return begin();
+    play(at + 1 < items.length ? at + 1 : at);
+  }
+
+  document.addEventListener("click", next);
+  document.addEventListener("keydown", (event) => {
+    const key = event.key.toLowerCase();
+    if (key === " " || key === "arrowright") { event.preventDefault(); next(); }
+    else if (key === "arrowleft") { begin(); play(at - 1); }
+    else if (key === "r") { begin(); play(at < 0 ? 0 : at); }
+    else if (key === "a") { begin(); all = true; play(at + 1 < items.length ? at + 1 : 0); }
+    else if (key === "h") { titles = !titles; third.style.opacity = titles && item.style.opacity === "1" && title.textContent ? 1 : 0; }
+    else if (key === "f") {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      else document.documentElement.requestFullscreen().catch(() => {});
+    }
+  });
+</script>
+</body>
+</html>

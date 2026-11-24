@@ -160,6 +160,29 @@ mu-law, any rate, mono). Answer: `video/mp4`, `slice_frames` pictures, silent.
 - With `FLASH_AHEAD` above 0 the pictures of a slice show the sound from that many pictures
   earlier (`X-Lookahead-Frames`).
 
+## Finished films instead of a call (render.sh)
+
+For prepared texts (a news bulletin, a speech, meeting notes) she does not need to be drawn live:
+`render.sh` makes finished films on your own NVIDIA card, with no call, no OpenAI key and no
+rented GPU. There is no hurry, so she is drawn at the model's own size (512 pixels; 448 or 416
+when the card has too little memory), and the films' sound is set 50 ms ahead of their pictures,
+which is how far the model's lips lead its own sound.
+
+    mkdir ~/bulletin && cp avatar-flash/samples/*.txt ~/bulletin/     # or your own .txt files
+    bash avatar-flash/render.sh ~/bulletin                              # [voice], default ur-PK-UzmaNeural
+    cd ~/bulletin && explorer.exe player.html                            # under WSL; any browser elsewhere
+
+- Each `name.txt` becomes `name.mp4` (960x720 with her voice). Her voice is made with Microsoft's
+  free neural voices (`edge-tts`, which needs the internet); `name.wav` or `name.mp3` put in the
+  folder is used instead, as it is. A film already made is kept; delete it to have it made again.
+- `player.html` plays them as a live bulletin: her quiet loop all the time, each item faded in
+  over it with its title (the file name, without leading numbers), a LIVE mark and the time of
+  day. Space or right arrow: next; left arrow: previous; R: again; A: all in turn; F: full screen.
+- How long it takes: the script prints how many seconds one second of her takes to draw on your
+  card. On an RTX 5070 Ti at 416 pixels that was 1.93; at 512, and on a plain RTX 5070, expect more.
+- The same needs as `home.sh`: Linux or Ubuntu under WSL2, a card with 12 GB or more, about 27 GB
+  under `~/tts-2-lab` the first time. `samples/` holds three short Urdu texts to try it with.
+
 ## Settings (environment variables, or `flash.env` next to the logs)
 
 `FLASH_MODEL` (`pro`; `lite`), `FLASH_STEPS` (4), `FLASH_SIZE` (416 for pro, 512 for lite; a
