@@ -71,7 +71,7 @@
           <option value="+0%" selected>normal pace</option>
           <option value="+10%">a little faster</option>
         </select>
-        <label class="file" title="Or a recording of her voice">Voice file&hellip;<input type="file" id="file" accept="audio/*"></label>
+        <label class="file" title="Or recordings of her voice (several at once: in name order)">Voice files&hellip;<input type="file" id="file" accept="audio/*" multiple></label>
         <label><input type="checkbox" id="auto" checked> speak as soon as ready</label>
         <button class="go" id="go" type="submit">Speak</button>
       </div>
@@ -411,8 +411,9 @@ $("panel").addEventListener("submit", (event) => {
 });
 $("file").addEventListener("change", (event) => {
   ensureAudio();
-  const file = event.target.files && event.target.files[0];
-  if (file) add("", file);
+  // Several at once (a whole dub made beforehand): one item each, in the order of their names.
+  const files = [...(event.target.files || [])].sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true }));
+  for (const file of files) add("", file);
   event.target.value = "";
 });
 $("auto").addEventListener("change", () => { draw(); consider(); });
