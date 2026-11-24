@@ -65,8 +65,9 @@ if (process.env.RELAY) {
   }, { urls, username, credential });
 }
 
-const LINES = (process.env.LINES || "").split(",").filter(Boolean).map(Number);
-if (!real) await page.addInitScript(({ VOICE, LINES }) => {
+// SPEAK_AT=5,25,50: the seconds of the call at which her voice speaks the recording.
+const SPEAK_AT = (process.env.SPEAK_AT || "").split(",").filter(Boolean).map(Number).filter((at) => Number.isFinite(at) && at >= 0);
+if (!real) await page.addInitScript(({ VOICE, SPEAK_AT }) => {
   const real = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input.url;
@@ -90,8 +91,8 @@ if (!real) await page.addInitScript(({ VOICE, LINES }) => {
       setTimeout(done, 3000);
     });
     // She speaks the recording after five seconds of silence, and once more after a pause
-    // (LINES=5,25,50: at those seconds of the call instead).
-    for (const at of LINES.length ? LINES : [5, 5 + recording.duration + 3]) {
+    // (or at the seconds in SPEAK_AT).
+    for (const at of SPEAK_AT.length ? SPEAK_AT : [5, 5 + recording.duration + 3]) {
       const line = audio.createBufferSource();
       line.buffer = recording;
       line.connect(mouth);
@@ -101,7 +102,7 @@ if (!real) await page.addInitScript(({ VOICE, LINES }) => {
     return new Response(JSON.stringify({ sessionId: "test", sdp: her.localDescription.sdp, maxSeconds: 600 }),
       { headers: { "Content-Type": "application/json" } });
   };
-}, { VOICE, LINES });
+}, { VOICE, SPEAK_AT });
 
 await page.goto(SITE, { waitUntil: "domcontentloaded" });
 // Her clips load first: the call waits for the stage anyway, but the page must have asked for it.
@@ -194,9 +195,11 @@ const clips = [];
 for (const s of samples) {
   if (s[6] && s[6] !== clips.at(-1)?.[1]) clips.push([Math.round((s[0] - samples[0][0]) / 100) / 10, s[6]]);
 }
+if (!speaking.length) errors.push("her voice was never heard in the recording (SPEAK_AT later than the call?)");
 const result = {
   started, seconds, samples: samples.length, clipsUnderneath: clips,
-  pictureAgainstSound: best,
+  // (null when she was never heard: then there is nothing to compare.)
+  pictureAgainstSound: speaking.length ? best : null,
   streamOnScreenShare: samples.length ? Math.round(samples.filter((s) => s[3] > 0.5).length / samples.length * 1000) / 1000 : null,
   streamOnScreenWhileSheSpeaks: speaking.length ? Math.round(speaking.filter((s) => s[3] > 0.5).length / speaking.length * 1000) / 1000 : null,
   filmedClipShowedInsteadSeconds: gaps,

@@ -75,10 +75,16 @@ export function AvatarPanel() {
           }
           avatarBus.setDirect(direct);
           const fresh = status.flash?.url && status.flash?.token && status.flash?.sliceFrames ? status.flash : null;
-          // In a call drawn by the whole-face server, one check that does not
-          // reach it changes nothing: taking her stage down would stop her
-          // voice with it. The stream is tried again while the call lasts.
-          const flash = fresh ?? (holdingCall() ? avatarBus.flash : null);
+          // In a call drawn by the whole-face server her stage is left as it
+          // is (taking it down would stop her voice with it), even when the
+          // server did not answer or answers at a new address. Only its
+          // address and token are brought up to date, for the stream to be
+          // tried again on; the rest waits for the first check after the call.
+          if (holdingCall()) {
+            if (fresh) avatarBus.setFlash(fresh);
+            return;
+          }
+          const flash = fresh;
           // The same for the whole-face server.
           if (flash && flash.url !== avatarBus.flash?.url) {
             fetch(`${flash.url}/health`).catch(() => {});
@@ -95,7 +101,6 @@ export function AvatarPanel() {
                 before.filter(name => name.startsWith("oa1_")).every(name => names.includes(name))) {
               return before;
             }
-            if (holdingCall()) return before;
             return names;
           });
           // The whole-face server draws all of her by itself: the filmed
