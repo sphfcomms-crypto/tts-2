@@ -62,6 +62,9 @@ export class FlashTalk {
   // A server with a look of its own: nothing else draws her in it, so a
   // broken stream is tried again for the whole call instead of given up.
   private keepTrying = false;
+  // The stream never worked: the caller takes over once her voice still
+  // held back has been heard.
+  private givingUp = false;
   private timeline = new Timeline();
   private order: Promise<void> = Promise.resolve();
   private requests = new AbortController();
@@ -82,8 +85,9 @@ export class FlashTalk {
   private talking = false; // she is in a line: her body gestures
   private lines = 0;
 
-  // onFail: the stream never produced a picture. The caller then draws her
-  // the older way; her voice has not been touched.
+  // onFail: the stream never produced a picture, or her stage was taken
+  // down. The caller then has her another way; the voice held back until
+  // then has been played.
   // gestures: what she is saying, for the kind of gesture that suits it.
   // greet: she speaks first in this call.
   constructor(
@@ -377,11 +381,13 @@ export class FlashTalk {
     // With no head drawn over them, the clips in which her own mouth moves
     // are not shown as they are.
     this.stage.director.overlaid = false;
-    if (!this.everShown && !this.keepTrying) {
-      // It never worked on this device or line: let the caller draw her
-      // the older way for this call.
-      this.stop();
-      this.onFail();
+    if (!this.everShown && (!this.keepTrying || this.retries >= RETRY.length)) {
+      // It never worked on this device or line: the caller has her another
+      // way for this call, once what she is saying now has been heard
+      // (stopping at once would drop the voice still held back). In a look
+      // of the server's own it is first tried a few times more: the server
+      // may only have been full for a moment.
+      this.givingUp = true;
       return;
     }
     // In a look of the server's own she sits in its quiet loop meanwhile,
@@ -403,7 +409,13 @@ export class FlashTalk {
   private tick() {
     const context = this.context;
     if (this.stopped || !context) return;
-    if (avatarBus.stage?.video !== this.stage.video) return this.stop();
+    // Her stage was taken down under the call, or the stream never worked:
+    // the caller plays her voice another way from here.
+    if (avatarBus.stage?.video !== this.stage.video || (this.givingUp && !this.hasSpeech)) {
+      this.stop();
+      this.onFail();
+      return;
+    }
     const video = this.stage.video;
     const lag = this.lag(context);
     const spoken = context.currentTime - lag; // when what is heard now was captured

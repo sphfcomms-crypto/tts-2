@@ -393,7 +393,7 @@ class Engine:
             planar, _ = self.pictures(session, np.zeros(self.slice * PER_FRAME, np.float32))
             rows.extend(planar)
         loop = rows + rows[-2:0:-1]
-        self.idle = encode(loop, fragmented=False)
+        self.idle = encode(loop, fragmented=False, keyint=FPS)
         self.idle_frames = len(loop)
         log(event="idle_loop", frames=self.idle_frames, seconds=round(self.idle_frames / FPS, 2), bytes=len(self.idle))
 
@@ -410,7 +410,7 @@ class Engine:
         return s
 
 
-def encode(planar, fragmented=True):
+def encode(planar, fragmented=True, keyint=250):
     """Pictures (planar YUV 4:2:0, one row each) -> one silent MP4 starting at time 0: fragmented, to
     be joined onto the stream, or a plain file for a video element to play and loop. (Its index is
     at the end: moving it to the front needs a file on disk, and the page fetches the file whole.)"""
@@ -420,10 +420,11 @@ def encode(planar, fragmented=True):
         if fragmented else {}))
     v = c.add_stream("libx264", rate=FPS, options={
         "preset": X264_PRESET, "crf": X264_CRF, "maxrate": f"{int(KBPS * 1.4)}k", "bufsize": f"{KBPS * 2}k",
-        # One keyframe per slice (each answer is a fresh encoder, so it starts with one): measured on
-        # her films, 527 kbit/s against 918 with one every 25 pictures, at the same quality (PSNR
-        # 44.74 against 44.86 dB), and a smaller step in sharpness at each keyframe (1.37 against 1.62 dB).
-        "x264-params": ("keyint=250:min-keyint=250:scenecut=0:bframes=0:colorprim=bt709:transfer=bt709:"
+        # keyint 250 for a slice: one keyframe per slice (each answer is a fresh encoder, so it starts with
+        # one). Measured on her films: 527 kbit/s against 918 with one every 25 pictures, at the same
+        # quality (PSNR 44.74 against 44.86 dB), and a smaller step in sharpness at each keyframe (1.37
+        # against 1.62 dB). The idle loop keeps one every 25 (keyint=FPS): the page seeks in it.
+        "x264-params": (f"keyint={keyint}:min-keyint={keyint}:scenecut=0:bframes=0:colorprim=bt709:transfer=bt709:"
                         "colormatrix=bt709:rc-lookahead=4:sync-lookahead=0:sliced-threads=1")})
     v.width, v.height, v.pix_fmt = OUT_W, OUT_H, "yuv420p"
     v.codec_context.time_base = Fraction(1, FPS)
