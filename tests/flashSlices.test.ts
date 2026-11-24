@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { holdFor, SliceCutter, squareMask, Timeline, wav16 } from "../src/lib/avatar/flashSlices";
+import { FirstSample, holdFor, lipLead, PICTURE_LAG, SliceCutter, squareMask, Timeline, wav16 } from "../src/lib/avatar/flashSlices";
 
 test("her voice is cut into whole slices, in order, with nothing lost or repeated", () => {
   const cutter = new SliceCutter(1000);
@@ -98,4 +98,29 @@ test("the stream is shown only inside the square the model draws, fading out tow
 test("a square away from the frame's top edge fades out upwards too", () => {
   const mask = squareMask([100, 200, 400], 1000, 1000);
   assert.ok(mask.includes("to bottom, transparent 20.00%, #000 23.60%, #000 54.00%, transparent 60.00%"));
+});
+
+test("her voice is played 50 ms before the pictures' clock unless the address says otherwise", () => {
+  assert.equal(PICTURE_LAG, 0.05);
+  assert.equal(lipLead(""), 0.05);
+  assert.equal(lipLead("?lipLag=40"), 0.04);
+  assert.equal(lipLead("?x=1&lipLag=0"), 0);
+  assert.equal(lipLead("?lipLag=500"), 0.15); // at most 150 ms
+  assert.equal(lipLead("?lipLag=-20"), 0); // never after the pictures
+  assert.equal(lipLead("?lipLag=abc"), 0.05);
+  assert.equal(lipLead("?lipLag="), 0.05);
+});
+
+test("the first sample's time is the earliest any block gives, until the first slice is cut", () => {
+  const rate = 48000;
+  const first = new FirstSample();
+  // Blocks of 2400 samples (50 ms) captured from t = 1.000 s, each reaching
+  // the page 5 to 30 ms after its last sample.
+  const late = [0.03, 0.005, 0.02, 0.012];
+  late.forEach((delay, k) => first.hear(1 + (k + 1) * 0.05 + delay, 2400, rate));
+  assert.ok(Math.abs(first.at - 1.005) < 1e-9, `at ${first.at}`);
+  first.settle();
+  // Once settled, a block that came early by the clock moves nothing.
+  first.hear(1 + 5 * 0.05 - 0.01, 2400, rate);
+  assert.ok(Math.abs(first.at - 1.005) < 1e-9);
 });

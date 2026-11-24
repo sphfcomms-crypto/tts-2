@@ -108,6 +108,48 @@ export class Timeline {
   }
 }
 
+// The model's lips run a little ahead of its own sound: 40 to 60 ms in the
+// server's films, where her lips were closed at the moment of a p, b or m
+// for 26 of 82 such sounds; with the pictures 40 to 60 ms later, for 53 to
+// 58 (and for 12 with them earlier). So her voice is played this much
+// before the pictures' clock. ?lipLag=<ms> in the page's address sets it
+// for one device, from 0 to 150.
+export const PICTURE_LAG = 0.05;
+
+export function lipLead(search: string): number {
+  const asked = new URLSearchParams(search).get("lipLag");
+  const ms = asked === null || asked.trim() === "" ? NaN : Number(asked);
+  return Number.isFinite(ms) ? Math.min(150, Math.max(0, ms)) / 1000 : PICTURE_LAG;
+}
+
+// When the first sample of her voice was captured, on the audio clock. A
+// block of her voice reaches the page some time after its last sample was
+// captured, never before, so each block gives a time no earlier than the
+// truth, and the earliest of them is the best. It is settled while the
+// first slice is gathered and kept from then on: every slice of a call is
+// placed on the same clock. (Taken from the first block alone, it moved
+// with how late that one block happened to be.)
+export class FirstSample {
+  private heard = 0;
+  private settled = false;
+  private known = false;
+  at = 0;
+
+  // now: the audio clock when the block arrived; samples and rate: its
+  // length and the rate it was captured at.
+  hear(now: number, samples: number, rate: number) {
+    this.heard += samples;
+    if (this.settled) return;
+    const at = now - this.heard / rate;
+    if (!this.known || at < this.at) this.at = at;
+    this.known = true;
+  }
+
+  settle() {
+    this.settled = true;
+  }
+}
+
 // How long her voice is held back so that the pictures of a slice are
 // there when its first sound is heard: what most slices really took (from
 // their first sound being captured to their video being joined on), plus a

@@ -60,6 +60,8 @@ export function AvatarPanel() {
     let alive = true;
     avatarBus.setVideoAvailable(undefined);
     findHead().then((found) => alive && setHead(found));
+    // A live call on the whole-face server is using her stage.
+    const holdingCall = () => Boolean(avatarBus.stage?.director.inCall && avatarBus.flash);
     const check = () =>
       fetch(withRendererPreference("/api/avatar/status"))
         .then((res) => (res.ok ? res.json() : { video: false }))
@@ -72,7 +74,11 @@ export function AvatarPanel() {
             fetch(`${direct.url}/piece/hello`).catch(() => {});
           }
           avatarBus.setDirect(direct);
-          const flash = status.flash?.url && status.flash?.token && status.flash?.sliceFrames ? status.flash : null;
+          const fresh = status.flash?.url && status.flash?.token && status.flash?.sliceFrames ? status.flash : null;
+          // In a call drawn by the whole-face server, one check that does not
+          // reach it changes nothing: taking her stage down would stop her
+          // voice with it. The stream is tried again while the call lasts.
+          const flash = fresh ?? (holdingCall() ? avatarBus.flash : null);
           // The same for the whole-face server.
           if (flash && flash.url !== avatarBus.flash?.url) {
             fetch(`${flash.url}/health`).catch(() => {});
@@ -89,6 +95,7 @@ export function AvatarPanel() {
                 before.filter(name => name.startsWith("oa1_")).every(name => names.includes(name))) {
               return before;
             }
+            if (holdingCall()) return before;
             return names;
           });
           // The whole-face server draws all of her by itself: the filmed
@@ -98,7 +105,7 @@ export function AvatarPanel() {
           setVideo(available);
         })
         .catch(() => {
-          if (alive && !avatarBus.stage?.director.inFilmCall) {
+          if (alive && !avatarBus.stage?.director.inFilmCall && !holdingCall()) {
             avatarBus.setVideoAvailable(false);
             setVideo(false);
           }

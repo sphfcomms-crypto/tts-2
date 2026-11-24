@@ -1,7 +1,7 @@
 import { avatarBus, type Stage } from "./bus";
 import type { CallGestures } from "./callGestures";
 import { FPS, fromFilm, nudge, stageClock } from "./director";
-import { holdFor, SliceCutter, squareMask, Timeline, wav16, type Piece } from "./flashSlices";
+import { FirstSample, holdFor, lipLead, PICTURE_LAG, SliceCutter, squareMask, Timeline, wav16, type Piece } from "./flashSlices";
 import { Reel } from "./liveTalk";
 
 // Her whole face, drawn new for every picture of a live call.
@@ -24,6 +24,8 @@ import { Reel } from "./liveTalk";
 //     being heard.
 // When a piece is not there in time, or the box stops answering, the
 // filmed clips underneath show instead, and the stream is started again.
+// Her voice is played a little before the pictures' clock (PICTURE_LAG):
+// the model's lips run that much ahead of its own sound.
 //
 // Her hands: the model draws only the square around her head, and the rest
 // of its frame is a photograph. Where the filmed clips were made from that
@@ -55,7 +57,11 @@ export class FlashTalk {
   private slice = 0.96; // seconds of voice per piece
   private look = 0; // seconds of sound the model hears beyond what it draws
   private cutter: SliceCutter | null = null;
-  private firstAt = -1; // audio-clock time of the first sample heard
+  private first = new FirstSample(); // when the first sample was captured
+  private lead = PICTURE_LAG; // seconds her voice is played before the pictures' clock
+  // A server with a look of its own: nothing else draws her in it, so a
+  // broken stream is tried again for the whole call instead of given up.
+  private keepTrying = false;
   private timeline = new Timeline();
   private order: Promise<void> = Promise.resolve();
   private requests = new AbortController();
@@ -91,7 +97,9 @@ export class FlashTalk {
     if (flash) {
       this.slice = flash.sliceFrames / flash.fps;
       this.look = flash.lookFrames / flash.fps;
+      this.keepTrying = Boolean(flash.ownLook);
     }
+    this.lead = lipLead(window.location.search);
     // Before any slice has come back, go by what the server says one costs it,
     // plus the way there and back. Without this the first slices of a call
     // came late and the picture flickered between the clip and the stream.
@@ -116,7 +124,7 @@ export class FlashTalk {
     const source = context.createMediaStreamSource(this.voice);
     this.source = source;
     const delay = context.createDelay(MAX_HOLD + 1);
-    delay.delayTime.value = this.hold;
+    delay.delayTime.value = this.voiceDelay();
     source.connect(delay).connect(context.destination);
     this.delay = delay;
 
@@ -208,7 +216,7 @@ export class FlashTalk {
     this.source.disconnect(old);
     old.disconnect();
     const delay = context.createDelay(MAX_HOLD + 1);
-    delay.delayTime.value = this.hold;
+    delay.delayTime.value = this.voiceDelay();
     this.source.connect(delay).connect(context.destination);
     this.delay = delay;
     this.nodes = this.nodes.map((node) => (node === old ? delay : node));
@@ -255,6 +263,8 @@ export class FlashTalk {
     return {
       renderer: "whole-face",
       hold: round(this.hold),
+      lead: round(this.lead),
+      keepTrying: this.keepTrying,
       slice: round(this.slice),
       pieceSecondsMedian: sorted.length ? round(sorted[Math.floor(sorted.length / 2)]) : null,
       pieceSecondsMax: sorted.length ? round(sorted[sorted.length - 1]) : null,
@@ -268,6 +278,11 @@ export class FlashTalk {
       rate: this.context?.sampleRate ?? null,
       overClips: this.overClips,
     };
+  }
+
+  // How long her voice is held back: the pictures' hold, less the lead.
+  private voiceDelay(hold = this.hold) {
+    return Math.max(0, hold - this.lead);
   }
 
   // Seconds between a sound being captured here and its picture being due.
@@ -295,14 +310,15 @@ export class FlashTalk {
       third[i] = sample;
       sum += (sample / 32768) ** 2;
     }
-    if (this.firstAt < 0) this.firstAt = context.currentTime - block.length / context.sampleRate;
+    this.first.hear(context.currentTime, block.length, context.sampleRate);
     const level = Math.sqrt(sum / Math.max(1, third.length));
     const seconds = block.length / context.sampleRate;
     if (level > LOUD) this.lastVoiceAt = context.currentTime;
     this.body(context, context.currentTime - seconds, seconds, level, level > LOUD);
     for (const slice of cutter.push(third)) {
+      this.first.settle();
       if (this.broken) continue;
-      this.send(slice.seq, slice.samples, this.firstAt + slice.first / this.rate);
+      this.send(slice.seq, slice.samples, this.first.at + slice.first / this.rate);
     }
   }
 
@@ -361,14 +377,16 @@ export class FlashTalk {
     // With no head drawn over them, the clips in which her own mouth moves
     // are not shown as they are.
     this.stage.director.overlaid = false;
-    if (!this.everShown) {
+    if (!this.everShown && !this.keepTrying) {
       // It never worked on this device or line: let the caller draw her
       // the older way for this call.
       this.stop();
       this.onFail();
       return;
     }
-    const wait = RETRY[this.retries++];
+    // In a look of the server's own she sits in its quiet loop meanwhile,
+    // her voice goes on, and the stream is tried again every 10 s.
+    const wait = RETRY[this.retries++] ?? (this.keepTrying ? RETRY[RETRY.length - 1] : undefined);
     if (wait === undefined) return;
     window.setTimeout(() => {
       if (this.stopped) return;
@@ -427,7 +445,7 @@ export class FlashTalk {
       const target = holdFor(this.took, this.slice + this.look, MIN_HOLD, MAX_HOLD);
       if (Math.abs(target - this.hold) > 0.12) {
         this.hold = target;
-        this.delay.delayTime.value = target;
+        this.delay.delayTime.value = this.voiceDelay(target);
       }
     }
   }

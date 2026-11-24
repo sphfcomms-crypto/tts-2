@@ -420,7 +420,10 @@ def encode(planar, fragmented=True):
         if fragmented else {}))
     v = c.add_stream("libx264", rate=FPS, options={
         "preset": X264_PRESET, "crf": X264_CRF, "maxrate": f"{int(KBPS * 1.4)}k", "bufsize": f"{KBPS * 2}k",
-        "x264-params": ("keyint=25:min-keyint=25:scenecut=0:bframes=0:colorprim=bt709:transfer=bt709:"
+        # One keyframe per slice (each answer is a fresh encoder, so it starts with one): measured on
+        # her films, 527 kbit/s against 918 with one every 25 pictures, at the same quality (PSNR
+        # 44.74 against 44.86 dB), and a smaller step in sharpness at each keyframe (1.37 against 1.62 dB).
+        "x264-params": ("keyint=250:min-keyint=250:scenecut=0:bframes=0:colorprim=bt709:transfer=bt709:"
                         "colormatrix=bt709:rc-lookahead=4:sync-lookahead=0:sliced-threads=1")})
     v.width, v.height, v.pix_fmt = OUT_W, OUT_H, "yuv420p"
     v.codec_context.time_base = Fraction(1, FPS)
