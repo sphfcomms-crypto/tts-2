@@ -12,7 +12,8 @@
 # AVATAR_GPU_KEY value). The tunnel's address is POSTed to <site>/api/avatar/flash/register for every
 # site in FLASH_REGISTER_URLS (space separated) or, if that is not set, for every site the lip-sync
 # box registers with (/workspace/avatar-gpu/register_urls.txt). Settings for server.py (FLASH_FRAMES,
-# FLASH_OUT, ...) can be kept in flash.env, one NAME=value per line.
+# FLASH_OUT, ...) can be kept in flash.env, one NAME=value per line. FLASH_LOOK=anchor draws her as
+# the news anchor (looks/anchor.env).
 set -uo pipefail
 L="${FLASH_ROOT:-/workspace/tts-2-lab}"
 E="${FLASH_ENV:-/opt/tts-2-lab}"
@@ -26,6 +27,11 @@ fi
 cd "$L" || { echo "missing $L: run setup.sh first"; exit 1; }
 mkdir -p logs run
 if [ -f flash.env ]; then set -a; . ./flash.env; set +a; fi
+# FLASH_LOOK=<name>: one of the looks kept in looks/ (its picture and square; see README.md).
+if [ -n "${FLASH_LOOK:-}" ]; then
+  [ -f "$HERE/looks/$FLASH_LOOK.env" ] || { echo "no look called $FLASH_LOOK in $HERE/looks"; exit 1; }
+  set -a; . "$HERE/looks/$FLASH_LOOK.env"; set +a
+fi
 PORT="${FLASH_PORT:-8100}"
 export FLASH_KEY_FILE="${FLASH_KEY_FILE:-/workspace/avatar-gpu/key.txt}"
 [ -s "$FLASH_KEY_FILE" ] || { echo "no key at $FLASH_KEY_FILE (the app's AVATAR_GPU_KEY value, mode 600)"; exit 1; }

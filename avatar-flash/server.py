@@ -402,11 +402,12 @@ class Engine:
 
 def encode(planar, fragmented=True):
     """Pictures (planar YUV 4:2:0, one row each) -> one silent MP4 starting at time 0: fragmented, to
-    be joined onto the stream, or a plain file (moov first) for a video element to play and loop."""
+    be joined onto the stream, or a plain file for a video element to play and loop. (Its index is
+    at the end: moving it to the front needs a file on disk, and the page fetches the file whole.)"""
     out = io.BytesIO()
     c = av.open(out, mode="w", format="mp4", options=(
         {"movflags": "frag_keyframe+empty_moov+default_base_moof+skip_trailer", "frag_duration": "2000000"}
-        if fragmented else {"movflags": "faststart"}))
+        if fragmented else {}))
     v = c.add_stream("libx264", rate=FPS, options={
         "preset": X264_PRESET, "crf": X264_CRF, "maxrate": f"{int(KBPS * 1.4)}k", "bufsize": f"{KBPS * 2}k",
         "x264-params": ("keyint=25:min-keyint=25:scenecut=0:bframes=0:colorprim=bt709:transfer=bt709:"
