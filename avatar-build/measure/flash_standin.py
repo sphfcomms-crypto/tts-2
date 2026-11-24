@@ -14,6 +14,11 @@ With --film its pictures are a film the real server made of that same voice file
 writes one): from the first sound of a line on, each slice is answered with the next pictures of
 the film, and silence with the film's first picture. What the page then shows is what it shows in
 a real call, face and all, and can be looked at.
+
+    python flash_standin.py <voice.wav> --film <film.mp4> --own-look <idle.mp4> --still <still.jpg> [--badge news]
+
+With --own-look it stands in for a server with a look of its own (FLASH_OWN_LOOK=1): /health says
+so, and it serves the loop at /idle.mp4 and the picture at /still.jpg.
 """
 import http.server
 import json
@@ -32,6 +37,12 @@ FULL = 0.12          # the loudness (RMS) drawn as white
 stats = {"slices": 0, "last_seq": -1, "out_of_order": 0}
 
 FILM = opt("--film", "")
+IDLE, STILL, BADGE = opt("--own-look", ""), opt("--still", ""), opt("--badge", "")
+IDLE_FRAMES = 0
+if IDLE:
+    IDLE_FRAMES = int(subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+                                      "stream=nb_read_frames", "-of", "csv=p=0", IDLE], stdout=subprocess.PIPE, check=True,
+                                     text=True).stdout.strip())
 film, at = None, -1          # the film's pictures, and the next one to show (-1: she is silent)
 if FILM:
     FRAMES, W, H = 28, 960, 720          # the real server's slice and frame
@@ -106,8 +117,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/health"):
             body = {"ok": True, "model": "stand-in", "fps": FPS, "slice_frames": FRAMES, "look_frames": 0,
-                    "width": W, "height": H, "work_seconds": DELAY, **({"square": SQUARE} if FILM else {}), **stats}
+                    "width": W, "height": H, "work_seconds": DELAY, **({"square": SQUARE} if FILM else {}), **stats,
+                    "own_look": bool(IDLE), "idle_frames": IDLE_FRAMES, "badge": BADGE}
             return self.answer(200, json.dumps(body).encode(), "application/json")
+        if self.path.startswith("/idle.mp4") and IDLE:
+            return self.answer(200, open(IDLE, "rb").read(), "video/mp4")
+        if self.path.startswith("/still.jpg") and STILL:
+            return self.answer(200, open(STILL, "rb").read(), "image/jpeg")
         if self.path.startswith("/voice.wav"):
             return self.answer(200, open(voice, "rb").read(), "audio/wav")
         self.answer(404, b"{}", "application/json")
