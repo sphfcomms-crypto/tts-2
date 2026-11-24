@@ -24,6 +24,9 @@ type Health = {
   square?: number[];
   width?: number;
   height?: number;
+  own_look?: boolean;
+  idle_frames?: number;
+  badge?: string;
 };
 export type FlashAccess = {
   url: string;
@@ -37,6 +40,10 @@ export type FlashAccess = {
   square?: [number, number, number];
   width?: number;
   height?: number;
+  // The server draws her in a look of its own, not the app's filmed one:
+  // its frames are shown whole, and its loop of her listening quietly
+  // (GET /idle.mp4, idleFrames pictures) plays between calls.
+  ownLook?: { idleFrames: number; badge: string };
 };
 
 let address: string | null = null; // null: not read from disk yet
@@ -136,6 +143,9 @@ export async function flashAccess(): Promise<FlashAccess | null> {
     workSeconds: status.work_seconds && status.work_seconds > 0 ? status.work_seconds : 0,
     ...(placed
       ? { square: [square[0], square[1], square[2]] as [number, number, number], width: status.width, height: status.height }
+      : {}),
+    ...(status.own_look === true && whole(status.idle_frames) && status.idle_frames > 0
+      ? { ownLook: { idleFrames: Math.round(status.idle_frames), badge: typeof status.badge === "string" ? status.badge : "" } }
       : {}),
   };
 }

@@ -52,6 +52,9 @@ export function AvatarPanel() {
   const [head, setHead] = useState<string | null>(null);
   const told = useRef(false);
   const [wholeFace, setWholeFace] = useState(false);
+  // The whole-face server's own look, when it draws one (its address and
+  // loop length, so the page reloads her clips only when that changes).
+  const [ownLook, setOwnLook] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -76,6 +79,7 @@ export function AvatarPanel() {
           }
           avatarBus.setFlash(flash);
           setWholeFace(Boolean(flash));
+          setOwnLook(flash?.ownLook ? `${flash.url}|${flash.ownLook.idleFrames}|${flash.ownLook.badge}` : "");
           const names: string[] = Array.isArray(status.clips) ? status.clips : [];
           setClips(before => {
             if (before.join() === names.join()) return before;
@@ -124,7 +128,9 @@ export function AvatarPanel() {
 
   const local = localCallAvatar || localScriptAvatar;
   if (head === null || (video === null && !local)) return null;
-  if (video && !local) return <VideoAvatar clips={clips} everyClip={wholeFace && clips.length === 0} />;
+  if (video && !local) {
+    return <VideoAvatar clips={clips} everyClip={wholeFace && clips.length === 0} ownLook={ownLook} />;
+  }
   return (
     <>
       {head ? <HeadAvatar asset={head} onFail={() => setHead("")} /> : <Avatar />}

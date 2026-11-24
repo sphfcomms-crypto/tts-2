@@ -9,6 +9,8 @@ Model   SoulX-FlashHead (Pro, 1.3 B parameters, Apache-2.0 code): a streaming vi
         the armchair are the still photograph.
 API     GET  /health
         POST /say?sid=<session>&seq=<n>[&t=<token>]    body: WAV, one slice of her voice
+        GET  /idle.mp4[?t=<token>]   her listening quietly, a loop (FLASH_OWN_LOOK=1 only)
+        GET  /still.jpg[?t=<token>]  her picture at the size the frames are sent
         Every request needs the header x-avatar-key or, from a browser, a signed token (the same
         scheme as avatar-gpu/server.py).
 Run     bash start.sh   (listens on 127.0.0.1:8100)
@@ -80,6 +82,14 @@ GAIN = float(os.environ.get("FLASH_GAIN", "1"))
 # With exact digital silence the model's sound features lose their scale and it leaves her lips
 # parted: measured 0.065 of the distance between her eyes, against 0.002 with this floor.
 FLOOR = float(os.environ.get("FLASH_NOISE_FLOOR", "0.0005"))
+# Which look she has. 0: the app's own (its filmed oa1 clips are this same picture, inputs/start.jpg),
+# so the page lays her drawn head over those clips. 1: a look of this server's own (any other
+# picture): the page then shows these frames whole and, between calls, plays a loop this server
+# draws of her listening quietly (/idle.mp4).
+OWN_LOOK = os.environ.get("FLASH_OWN_LOOK", "0") == "1"
+IDLE_SECONDS = float(os.environ.get("FLASH_IDLE_SECONDS", "6"))
+# Laid over her by the page, for a look that needs it. "news": a LIVE badge and the viewer's own time.
+BADGE = os.environ.get("FLASH_BADGE", "")
 MAX_SESSIONS = int(os.environ.get("FLASH_MAX_SESSIONS", "3"))
 SESSION_IDLE = float(os.environ.get("FLASH_SESSION_IDLE", "45"))
 KEY_FILE = os.environ.get("FLASH_KEY_FILE", os.path.join(ROOT, "key.txt"))
@@ -216,7 +226,11 @@ class Engine:
         self.osize = round(size * sx)
         if abs(x0 * sx - self.ox) > 0.01 or abs(size * sx - self.osize) > 0.01 or abs(sx - sy) > 1e-4:
             log(event="warning", message="the square does not land on whole pixels of the output; her head may sit a fraction of a pixel off")
-        base = np.asarray(full.resize((OUT_W, OUT_H), Image.LANCZOS), np.float32)
+        rest_picture = full.resize((OUT_W, OUT_H), Image.LANCZOS)
+        still = io.BytesIO()
+        rest_picture.save(still, format="JPEG", quality=90)
+        self.still = still.getvalue()                                          # what the page shows before anything moves
+        base = np.asarray(rest_picture, np.float32)
         self.base = torch.from_numpy(base).to(self.dev)                       # (H, W, 3), 0..255
         self.under = self.base[self.oy:self.oy + self.osize, self.ox:self.ox + self.osize].clone()
         n = self.osize
@@ -238,6 +252,8 @@ class Engine:
         self.sessions = {}
         self.gpu = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gpu")
         self.last = None
+        self.idle = None                 # her listening quietly, as a loop (an own look only)
+        self.idle_frames = 0
         self.work = 0.0                  # seconds of work for one slice, as lately measured
         self.count = 0
         self.started = time.time()
@@ -289,8 +305,16 @@ class Engine:
             matrix=[[round(float(v), 3) for v in row] for row in sol[:3].T], offset=[round(float(v), 3) for v in sol[3]])
 
     # -- one slice: sound -> pictures -> her full picture -> MP4 ----------------------------------------
-    @torch.no_grad()
     def draw(self, session, samples):
+        planar, tm = self.pictures(session, samples)
+        t = time.perf_counter()
+        data = encode(planar)
+        tm["encode"] = time.perf_counter() - t
+        return data, tm
+
+    @torch.no_grad()
+    def pictures(self, session, samples):
+        """One slice of sound -> its pictures, whole frames as planar YUV 4:2:0 (one row each)."""
         tm = {}
         t = time.perf_counter()
         if FLOOR > 0:
@@ -327,11 +351,7 @@ class Engine:
         k = y.shape[0]
         planar = torch.cat([y.reshape(k, -1), cb.reshape(k, -1), cr.reshape(k, -1)], 1).cpu().numpy()
         tm["compose"] = time.perf_counter() - t
-
-        t = time.perf_counter()
-        data = encode(planar)
-        tm["encode"] = time.perf_counter() - t
-        return data, tm
+        return planar, tm
 
     def warm_up(self):
         """Run the whole path a few times so the first real slice is already fast, and keep where
@@ -350,6 +370,22 @@ class Engine:
             if TAE and i == 1:
                 self.fit_colour()
         self.rest = (session.motion.clone(), list(session.sound))
+        if OWN_LOOK:
+            self.make_idle()
+
+    def make_idle(self):
+        """Her listening quietly, as a loop the page plays between calls and whenever the stream is
+        late: drawn from the same settled pose and quiet a call starts with, so it is the same
+        picture, then played forward and back again so that it loops without a jump."""
+        session = Session(self.cached, self.ref_motion, self.rest)
+        rows = []
+        for _ in range(max(2, round(IDLE_SECONDS * FPS / self.slice))):
+            planar, _ = self.pictures(session, np.zeros(self.slice * PER_FRAME, np.float32))
+            rows.extend(planar)
+        loop = rows + rows[-2:0:-1]
+        self.idle = encode(loop, fragmented=False)
+        self.idle_frames = len(loop)
+        log(event="idle_loop", frames=self.idle_frames, seconds=round(self.idle_frames / FPS, 2), bytes=len(self.idle))
 
     def session(self, sid, fresh):
         now = time.time()
@@ -364,11 +400,14 @@ class Engine:
         return s
 
 
-def encode(planar):
-    """Pictures (planar YUV 4:2:0, one row each) -> one silent fragmented MP4 starting at time 0."""
+def encode(planar, fragmented=True):
+    """Pictures (planar YUV 4:2:0, one row each) -> one silent MP4 starting at time 0: fragmented, to
+    be joined onto the stream, or a plain file for a video element to play and loop. (Its index is
+    at the end: moving it to the front needs a file on disk, and the page fetches the file whole.)"""
     out = io.BytesIO()
-    c = av.open(out, mode="w", format="mp4", options={
-        "movflags": "frag_keyframe+empty_moov+default_base_moof+skip_trailer", "frag_duration": "2000000"})
+    c = av.open(out, mode="w", format="mp4", options=(
+        {"movflags": "frag_keyframe+empty_moov+default_base_moof+skip_trailer", "frag_duration": "2000000"}
+        if fragmented else {}))
     v = c.add_stream("libx264", rate=FPS, options={
         "preset": X264_PRESET, "crf": X264_CRF, "maxrate": f"{int(KBPS * 1.4)}k", "bufsize": f"{KBPS * 2}k",
         "x264-params": ("keyint=25:min-keyint=25:scenecut=0:bframes=0:colorprim=bt709:transfer=bt709:"
@@ -400,6 +439,8 @@ CORS = [(b"access-control-allow-origin", b"*"),
         (b"access-control-allow-methods", b"GET, POST, OPTIONS"),
         (b"access-control-max-age", b"600")]
 TOKEN_MAX_SECONDS = 2 * 3600
+# What a browser may ask for with the signed token instead of the key.
+TOKEN_PATHS = {("POST", "/say"), ("GET", "/idle.mp4"), ("GET", "/still.jpg")}
 
 
 def token_ok(query):
@@ -416,8 +457,9 @@ def token_ok(query):
 
 
 class KeyGate:
-    """Lets a request through with the key header (the app's server) or, for POST /say, a signed
-    token in its address (a browser). Answers to browsers get the cross-origin headers."""
+    """Lets a request through with the key header (the app's server) or, for POST /say, GET
+    /idle.mp4 and GET /still.jpg, a signed token in its address (a browser). Answers to browsers
+    get the cross-origin headers."""
 
     def __init__(self, inner):
         self.inner = inner
@@ -440,7 +482,7 @@ class KeyGate:
 
         if scope["method"] == "OPTIONS":
             return await answer(204)
-        if not (scope["method"] == "POST" and scope["path"] == "/say" and token_ok(scope.get("query_string", b""))):
+        if not ((scope["method"], scope["path"]) in TOKEN_PATHS and token_ok(scope.get("query_string", b""))):
             return await answer(401, b'{"ok":false,"error":"unauthorized"}')
 
         async def send_cors(message):
@@ -466,7 +508,21 @@ def health():
     e = ENGINE
     return {"ok": True, "model": f"SoulX-FlashHead {MODEL}, {STEPS} steps" + (", TAEHV" if TAE else ""), "fps": FPS, "slice_frames": e.slice, "look_frames": LOOK,
             "width": OUT_W, "height": OUT_H, "square": [e.ox, e.oy, e.osize], "size": SIZE, "work_seconds": round(e.work, 3), "speed": e.last, "requests": e.count, "sessions": len(e.sessions),
+            "own_look": OWN_LOOK, "idle_frames": e.idle_frames, "badge": BADGE,
             "uptime_seconds": round(time.time() - e.started), "idle_seconds": round(time.time() - LAST_USED)}
+
+
+@app.get("/idle.mp4")
+def idle():
+    e = ENGINE
+    if e.idle is None:
+        return _err(404, "no idle loop: this server draws the app's own look (FLASH_OWN_LOOK=0)")
+    return Response(e.idle, media_type="video/mp4", headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.get("/still.jpg")
+def still():
+    return Response(ENGINE.still, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
 
 
 def _err(status, msg):

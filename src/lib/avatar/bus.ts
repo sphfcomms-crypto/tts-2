@@ -43,6 +43,8 @@ export type Flash = {
   square?: [number, number, number];
   width?: number;
   height?: number;
+  // The server draws her in a look of its own (see avatarFlash.ts).
+  ownLook?: { idleFrames: number; badge: string };
 };
 
 type Tap = { analyser: AnalyserNode; release: () => void };
