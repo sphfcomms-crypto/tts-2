@@ -170,7 +170,22 @@ whole pixels of the output), `FLASH_OUT` (`960x720`), `FLASH_FEATHER` (0.09) and
 `FLASH_FEATHER_BOTTOM` (0.14: the fade at the square's edges as a share of its size),
 `FLASH_NOISE_FLOOR` (0.0005), `FLASH_GAIN` (1), `FLASH_SEED` (42), `FLASH_X264_PRESET` (faster),
 `FLASH_X264_CRF` (20), `FLASH_KBPS` (1600), `FLASH_MAX_SESSIONS` (3), `FLASH_SESSION_IDLE` (45 s),
-`FLASH_COMPILE` (0; 1 needs a C compiler on the box), `FLASH_PORT` (8100).
+`FLASH_COMPILE` (0; 1 needs a C compiler on the box), `FLASH_PORT` (8100), `FLASH_OWN_LOOK` (0;
+see below), `FLASH_IDLE_SECONDS` (6), `FLASH_BADGE` (empty; `news`).
+
+**Another look.** The app's filmed clips are of the picture in `inputs/start.jpg`, so her drawn
+head is laid over them. For any other picture (another outfit, another room) set
+`FLASH_OWN_LOOK=1` with its `FLASH_PICTURE` and `FLASH_BOX`: at start the server also draws her
+listening quietly for `FLASH_IDLE_SECONDS`, played forward and back as a loop (`GET /idle.mp4`),
+and keeps the picture at the size it sends (`GET /still.jpg`). The page then shows the server's
+frames whole, plays that loop between calls, and leaves out the app's room picture.
+`FLASH_BADGE=news` has the page lay a red LIVE mark and the viewer's own time over her. The
+news anchor (a 1664x1248 picture, so that the 960x720 frames are a whole 15/26 of it):
+
+    FLASH_PICTURE=/workspace/tts-2-lab/inputs/anchor.jpg
+    FLASH_BOX=468,52,754
+    FLASH_OWN_LOOK=1
+    FLASH_BADGE=news
 
 ## In the app
 

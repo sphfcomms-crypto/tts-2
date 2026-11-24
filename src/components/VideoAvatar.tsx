@@ -1,6 +1,6 @@
 "use client";
 import React, { useEffect, useRef, useState } from "react";
-import { avatarBus, Mood } from "@/lib/avatar/bus";
+import { avatarBus, type Flash, Mood } from "@/lib/avatar/bus";
 import { Director, DISSOLVE, fromFilm, Unit } from "@/lib/avatar/director";
 
 // Her on video, photo-real.
@@ -64,6 +64,20 @@ async function listUnits(clips: string[], everyClip: boolean): Promise<Unit[]> {
   }
 }
 
+// The whole-face server's own look: its loop of her listening quietly is the
+// only clip. It is the same picture as the server's frames, so the stream
+// can be shown whole over it and nothing jumps when a call begins.
+export function ownLookUnits(flash: Flash): Unit[] {
+  if (!flash.ownLook) return [];
+  return [{
+    name: "flash_idle",
+    frames: flash.ownLook.idleFrames,
+    pool: "listen",
+    also: ["idle", "think", "talk", "greet"],
+    file: `${flash.url}/idle.mp4?t=${encodeURIComponent(flash.token)}`,
+  }];
+}
+
 // One clip, whole, from the GPU box if it answers quickly, else from the app.
 async function fetchClip(unit: Unit): Promise<Blob> {
   const direct = avatarBus.direct;
@@ -86,7 +100,43 @@ async function fetchClip(unit: Unit): Promise<Blob> {
 // What she needs first comes first: something to sit and listen in.
 const ORDER: Unit["pool"][] = ["listen", "idle", "think", "talk", "greet"];
 
-export function VideoAvatar({ clips, everyClip = false }: { clips: string[]; everyClip?: boolean }) {
+// A live broadcast's marks, for the news look: LIVE, and the viewer's own time.
+function NewsBadge() {
+  const now = () => new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const [time, setTime] = useState(now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setTime(now()), 10_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <>
+      <span
+        className="absolute left-3 top-3 rounded-sm bg-[#d0021b] px-2 py-0.5 text-xs font-bold tracking-wider text-white"
+        style={{ zIndex: 5 }}
+      >
+        LIVE
+      </span>
+      <span
+        className="absolute right-3 top-3 text-sm font-semibold text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.7)]"
+        style={{ zIndex: 5 }}
+      >
+        {time}
+      </span>
+    </>
+  );
+}
+
+// ownLook: set while the whole-face server draws her in a look of its own
+// (see ownLookUnits); it changes when that server or its loop does.
+export function VideoAvatar({
+  clips,
+  everyClip = false,
+  ownLook = "",
+}: {
+  clips: string[];
+  everyClip?: boolean;
+  ownLook?: string;
+}) {
   const talk = useRef<HTMLVideoElement>(null);
   const first = useRef<HTMLVideoElement>(null);
   const second = useRef<HTMLVideoElement>(null);
@@ -95,6 +145,9 @@ export function VideoAvatar({ clips, everyClip = false }: { clips: string[]; eve
   const [filmCamera, setFilmCamera] = useState(false);
   const [talking, setTalking] = useState(false);
   const [mood, setMood] = useState<Mood>(avatarBus.mood);
+  const [poster, setPoster] = useState("");
+  const own = ownLook ? avatarBus.flash : null;
+  const badge = own?.ownLook?.badge ?? "";
 
   const prepared = clips.join(",");
   useEffect(() => {
@@ -114,7 +167,21 @@ export function VideoAvatar({ clips, everyClip = false }: { clips: string[]; eve
       if (soft) top.animate([{ opacity: 0 }, { opacity: 1 }], { duration: DISSOLVE, easing: "linear" });
     };
 
-    listUnits(prepared.split(","), everyClip).then(async (units) => {
+    const look = ownLook ? avatarBus.flash : null;
+    if (look?.ownLook) {
+      // Her picture at once, while the loop is on its way.
+      fetch(`${look.url}/still.jpg?t=${encodeURIComponent(look.token)}`)
+        .then((res) => (res.ok ? res.blob() : null))
+        .then((blob) => {
+          if (gone || !blob) return;
+          const url = URL.createObjectURL(blob);
+          urls.push(url);
+          setPoster(url);
+        })
+        .catch(() => {});
+    }
+    const listed = look?.ownLook ? Promise.resolve(ownLookUnits(look)) : listUnits(prepared.split(","), everyClip);
+    listed.then(async (units) => {
       if (gone) return;
       made = new Director(players, units, show, () => avatarBus.phrase);
       // What she is doing at this moment (the effect below only hears of changes).
@@ -169,8 +236,9 @@ export function VideoAvatar({ clips, everyClip = false }: { clips: string[]; eve
         player.load();
       }
       urls.forEach((url) => URL.revokeObjectURL(url));
+      setPoster("");
     };
-  }, [prepared, everyClip]);
+  }, [prepared, everyClip, ownLook]);
 
   // What her body does next: a thoughtful look while an answer is being
   // made, otherwise listening. (That she has begun to speak, the lip sync
@@ -188,7 +256,11 @@ export function VideoAvatar({ clips, everyClip = false }: { clips: string[]; eve
   return (
     <div
       className="relative mx-auto w-full max-w-[720px] aspect-[4/3] mb-10 rounded-lg overflow-hidden shadow-textarea bg-black bg-cover bg-center"
-      style={{ backgroundImage: `url(${FILES}/${everyClip || clips.includes("oa1_listen_neutral") ? "oa1-poster.jpg" : "poster.jpg"})` }}
+      style={{
+        backgroundImage: own
+          ? poster ? `url(${poster})` : "none"
+          : `url(${FILES}/${everyClip || clips.includes("oa1_listen_neutral") ? "oa1-poster.jpg" : "poster.jpg"})`,
+      }}
     >
       <video ref={first} className={layer} style={{ zIndex: 2 }} muted playsInline preload="auto" />
       <video ref={second} className={layer} style={{ zIndex: 1 }} muted playsInline preload="auto" />
@@ -208,17 +280,21 @@ export function VideoAvatar({ clips, everyClip = false }: { clips: string[]; eve
       {/* The room: one still picture laid over everything outside the zone
           she moves in. It is not video, so it cannot flicker or shift from
           clip to clip. (Made by avatar-build/video/units/lock_background.py.) */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={`${FILES}/room.webp`}
-        alt=""
-        draggable={false}
-        className={`${layer} pointer-events-none select-none`}
-        style={{ zIndex: 4, visibility: speaking || filmCamera ? "hidden" : "visible" }}
-        onError={(event) => {
-          event.currentTarget.style.display = "none";
-        }}
-      />
+      {/* (Not in a look of the server's own: that is another room.) */}
+      {!own && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={`${FILES}/room.webp`}
+          alt=""
+          draggable={false}
+          className={`${layer} pointer-events-none select-none`}
+          style={{ zIndex: 4, visibility: speaking || filmCamera ? "hidden" : "visible" }}
+          onError={(event) => {
+            event.currentTarget.style.display = "none";
+          }}
+        />
+      )}
+      {own && badge === "news" && <NewsBadge />}
     </div>
   );
 }
