@@ -154,7 +154,19 @@ async function boot() {
   try { kept = localStorage.getItem("live-voice") || ""; } catch {}
   const usable = (v) => [...voice.options].some((o) => o.value === v);
   voice.value = usable(kept) ? kept : health.eleven_voices ? "saira" : health.openai_voices ? "marin" : "ur-PK-UzmaNeural";
-  voice.addEventListener("change", () => { try { localStorage.setItem("live-voice", voice.value); } catch {} });
+  // ElevenLabs' newest model keeps its own pace (it does not take a speed), so the pace menu rests
+  // at normal while one of its voices is chosen, and comes back for the others.
+  const rate = $("rate");
+  let paceKept = rate.value;
+  const pace = () => {
+    const fixed = voice.selectedOptions[0]?.parentElement?.id === "eleven";
+    if (fixed && !rate.disabled) { paceKept = rate.value; rate.value = "+0%"; }
+    if (!fixed && rate.disabled) rate.value = paceKept;
+    rate.disabled = fixed;
+    rate.title = fixed ? "ElevenLabs voices keep their own natural pace" : "How fast she speaks";
+  };
+  pace();
+  voice.addEventListener("change", () => { pace(); try { localStorage.setItem("live-voice", voice.value); } catch {} });
   const second = health.work_seconds && health.slice_frames ? health.work_seconds * health.fps / health.slice_frames : 0;
   status(second ? `Ready. One second of her takes ${second.toFixed(2)} s to draw on this card${second > 1 ? ": a long text waits a little before she starts" : ""}.` : "Ready.");
   fitPanel();
