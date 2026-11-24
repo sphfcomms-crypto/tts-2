@@ -15,12 +15,16 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DIR="${1:-$HOME/bulletin}"
 VOICE="${2:-ur-PK-UzmaNeural}"
-if [ ! -d "$DIR" ]; then
-  mkdir -p "$DIR" && cp "$HERE"/samples/*.txt "$DIR"/
-  echo "[demo] made $DIR with three sample texts; put your own .txt files there too (01-..., 02-...)"
+mkdir -p "$DIR"
+# A folder with nothing to read in it (just made, or made empty by hand) gets the three samples.
+has_items() { local f; for f in "$1"/*.txt "$1"/*.wav "$1"/*.mp3; do [ -e "$f" ] && return 0; done; return 1; }
+if ! has_items "$DIR"; then
+  cp "$HERE"/samples/*.txt "$DIR"/
+  echo "[demo] $DIR had nothing to read: put the three sample texts there; add your own .txt files too (01-..., 02-...)"
 fi
 echo "[demo] 1 of 2: films of the texts in $DIR"
-bash "$HERE/render.sh" "$DIR" "$VOICE" || { echo "[demo] the films could not be made: see the lines above"; exit 1; }
+# Even when no film could be made (no internet for her voice, say), the live page still starts.
+bash "$HERE/render.sh" "$DIR" "$VOICE" || echo "[demo] the films could not all be made: see the lines above; the live page starts anyway"
 echo "[demo] 2 of 2: the live page"
 FLASH_SIZE="${FLASH_LIVE_SIZE:-}" bash "$HERE/live.sh" || { echo "[demo] the live page did not start: the films still play from $DIR/player.html"; exit 1; }
 command -v explorer.exe >/dev/null 2>&1 && (cd "$DIR" && explorer.exe player.html >/dev/null 2>&1)
