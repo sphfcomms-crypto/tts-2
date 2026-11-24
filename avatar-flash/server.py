@@ -67,7 +67,17 @@ SIZE = int(os.environ.get("FLASH_SIZE", "416" if MODEL == "pro" else "512"))
 TAE = os.environ.get("FLASH_TAE", "1") == "1" and MODEL != "lite"
 # Pictures of sound the model may hear beyond the last picture it draws. Lips are shaped by the
 # sound that follows, and without any of it they close late. Costs that much more delay.
-LOOK = int(os.environ.get("FLASH_LOOK", "0"))
+# FLASH_AHEAD; a number in FLASH_LOOK is read the same way, as it was before FLASH_LOOK could also
+# name one of the looks in looks/ (start.sh reads those names; here they are not numbers, and skipped).
+def _ahead():
+    for name in ("FLASH_AHEAD", "FLASH_LOOK"):
+        value = os.environ.get(name, "").strip()
+        if value.isdigit():
+            return int(value)
+    return 0
+
+
+LOOK = _ahead()
 PICTURE = os.environ.get("FLASH_PICTURE", os.path.join(ROOT, "inputs", "start.jpg"))
 # The square of the picture the model draws: left, top, size in the picture's own pixels.
 BOX = [int(v) for v in os.environ.get("FLASH_BOX", "520,0,520").split(",")]
