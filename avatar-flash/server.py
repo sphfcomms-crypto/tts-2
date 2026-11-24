@@ -43,6 +43,7 @@ os.chdir(REPO)                       # the model's own code opens its settings f
 sys.path.insert(0, REPO)
 
 import av  # noqa: E402
+import voices  # noqa: E402  (her voice from text, for the live page: voices.py next to this file)
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
 import torch  # noqa: E402
@@ -125,6 +126,9 @@ KG = 1.0 - KR - KB
 def log(**kw):
     kw["t"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     print(json.dumps(kw), flush=True)
+
+
+voices.LOG = log          # her voice's retries and checks go to the same log
 
 
 def load_key():
@@ -535,6 +539,8 @@ def health():
     return {"ok": True, "model": f"SoulX-FlashHead {MODEL}, {STEPS} steps" + (", TAEHV" if TAE else ""), "fps": FPS, "slice_frames": e.slice, "look_frames": LOOK,
             "width": OUT_W, "height": OUT_H, "square": [e.ox, e.oy, e.osize], "size": SIZE, "work_seconds": round(e.work, 3), "speed": e.last, "requests": e.count, "sessions": len(e.sessions),
             "own_look": OWN_LOOK, "idle_frames": e.idle_frames, "badge": BADGE,
+            "openai_voices": LIVE_PAGE and bool(voices.openai_key()),
+            "eleven_voices": LIVE_PAGE and bool(voices.eleven_key()),
             "uptime_seconds": round(time.time() - e.started), "idle_seconds": round(time.time() - LAST_USED)}
 
 
@@ -562,7 +568,8 @@ def live_token():
 
 @app.post("/tts")
 async def tts(request: Request):
-    """Her voice from text: {"text": ..., "voice": "ur-PK-UzmaNeural", "rate": "+0%"} -> MP3."""
+    """Her voice from text: {"text": ..., "voice": "saira" | "marin" | "ur-PK-UzmaNeural" | ..., "rate": "+0%"}.
+    ElevenLabs' and OpenAI's voices answer a WAV, Microsoft's an MP3 (voices.py)."""
     if not LIVE_PAGE:
         return _err(404, "the live page is off (live.sh turns it on)")
     try:
@@ -574,23 +581,23 @@ async def tts(request: Request):
     rate = str(body.get("rate", "+0%"))
     if not text:
         return _err(400, "no text")
-    if not re.fullmatch(r"[a-z]{2,3}-[A-Z]{2,4}-[A-Za-z]+Neural", voice) or not re.fullmatch(r"[+-][0-9]{1,2}%", rate):
-        return _err(400, "voice like ur-PK-UzmaNeural, rate like +0% or -10%")
+    if not voices.known(voice) or not voices.RATE.fullmatch(rate):
+        return _err(400, "voice like saira, marin or ur-PK-UzmaNeural, rate like +0% or -10%")
     try:
-        import edge_tts
+        if voices.engine(voice) in ("eleven", "openai"):
+            data = await asyncio.get_running_loop().run_in_executor(None, voices.speech, text, voice, rate)
+            kind = "audio/wav"
+        else:
+            data = await voices.edge_speech(text, voice, rate)
+            kind = "audio/mpeg"
     except ImportError:
         return _err(503, "edge-tts is not installed here (live.sh installs it)")
-    out = io.BytesIO()
-    try:
-        async for chunk in edge_tts.Communicate(text, voice, rate=rate).stream():
-            if chunk.get("type") == "audio":
-                out.write(chunk["data"])
     except Exception as ex:  # noqa: BLE001
-        log(event="tts_error", error=repr(ex))
-        return _err(502, f"her voice could not be made (edge-tts needs the internet): {ex}")
-    if not out.tell():
+        log(event="tts_error", voice=voice, error=repr(ex)[:300])
+        return _err(502, f"her voice could not be made: {ex}")
+    if not data:
         return _err(502, "no voice came back")
-    return Response(out.getvalue(), media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
+    return Response(data, media_type=kind, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/idle.mp4")

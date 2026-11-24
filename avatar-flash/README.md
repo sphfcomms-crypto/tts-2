@@ -172,14 +172,39 @@ the three samples. Run it again after adding texts: films already made are kept.
 
 ## Reading what you type, live, on your own card (live.sh)
 
+    bash avatar-flash/live.sh --key        # once per key: ElevenLabs (sk_...) and/or OpenAI (sk-...)
     bash avatar-flash/live.sh              # then http://localhost:8100/live (opened for you under WSL)
     FLASH_SIZE=416 bash avatar-flash/live.sh
     bash avatar-flash/live.sh --stop
+    bash avatar-flash/live.sh --forget-key # removes the saved keys
 
-It starts the server on this machine only (no tunnel, no OpenAI key, no rented GPU) with a page:
-type what she should say and press Speak. Her voice is made from the text with Microsoft's free
-neural voices (`edge-tts`, POST `/tts`; the internet is needed), or taken from a voice file, and
-her pictures are drawn one slice at a time. She starts speaking once enough is drawn that she will
+It starts the server on this machine only (no tunnel, no rented GPU) with a page: type what she
+should say and press Speak. Her voice is made from the text (POST `/tts`, `voices.py`; the internet
+is needed), or taken from a voice file, and her pictures are drawn one slice at a time. The voices:
+
+- **ElevenLabs** (with its key): native Urdu voices from ElevenLabs' voice library on its newest
+  model (`eleven_v4`, `FLASH_ELEVEN_MODEL`): Saira (first on the page), Reva, Reva (soft). The most
+  natural. On the Starter plan an Urdu character cost about 0.4 credits (a minute of her: ~300).
+- **OpenAI** (with its key): Marin, Coral, Shimmer, Sage (`gpt-4o-mini-tts`, asked for the manner
+  of a news anchor).
+- **Microsoft** (no key): Uzma, Gul, Swara, Neerja (`edge-tts`).
+
+`--key` reads the key without showing it or keeping it in the shell's history, and keeps it in
+`~/tts-2-lab/elevenlabs.key` or `openai.key`, readable by you only; it is sent to its own service
+and nowhere else. At start, each service with a key is tried with two words, so a refused key or a
+blocked line shows then, not in front of anyone.
+
+A speech model now and then leaves out the end of what it was given (OpenAI's, in our tests, lost
+or garbled its closing line, like "shukriya" or "Allah hafiz", in about one reading in eight;
+ElevenLabs' left out nothing in ours). So a text is spoken in even pieces
+of a sentence or two, made a few at once, and with an OpenAI key every piece is heard back by
+OpenAI's transcriber and made again if its last words are missing (`FLASH_TTS_CHECK=0` turns this
+off). The comparison is of consonant skeletons, since the transcriber writes Urdu speech in Urdu or
+Hindi letters as it likes. The pieces are joined with a short pause; a 721-character news text
+(about a minute of her) took 11 s in Saira's voice. `python3 avatar-flash/test_voices.py` checks
+all of this without keys or the internet.
+
+She starts speaking once enough is drawn that she will
 not have to stop: at once on a card faster than her voice, after a while on a slower one (on a card
 that takes 2.2 s per second of her, an 11 s line started after 20 s and ran without a stop). Her
 quiet loop shows meanwhile, with the LIVE mark and the time. If her pictures still fall behind, her
@@ -303,3 +328,5 @@ box), and a call with her head over the clips against the real server on a GPU.
 | `preview.sh` | run a branch of the app on the box, with the server, behind its own link |
 | `home.sh` | the same on a machine of your own: checks it, then runs `preview.sh` under `~/tts-2-lab` |
 | `test_client.py` | feeds it a recording the way a call does; writes the film and the timings |
+| `live.sh`, `live.html` | the live page on your own card: what you type, she says |
+| `voices.py`, `test_voices.py` | her voice from text (ElevenLabs, OpenAI, Microsoft), each piece checked; its checks |

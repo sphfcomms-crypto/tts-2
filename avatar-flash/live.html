@@ -61,10 +61,23 @@
       <textarea id="text" dir="auto" placeholder="What she should say (Urdu, Hinglish or English). Ctrl+Enter to speak."></textarea>
       <div class="row">
         <select id="voice" title="Her voice">
-          <option value="ur-PK-UzmaNeural">Urdu: Uzma</option>
-          <option value="ur-IN-GulNeural">Urdu: Gul</option>
-          <option value="hi-IN-SwaraNeural">Hindi: Swara</option>
-          <option value="en-IN-NeerjaNeural">English: Neerja</option>
+          <optgroup label="ElevenLabs: native Urdu" id="eleven">
+            <option value="saira">Saira</option>
+            <option value="reva">Reva</option>
+            <option value="reva-soft">Reva (soft)</option>
+          </optgroup>
+          <optgroup label="OpenAI" id="openai">
+            <option value="marin">Marin</option>
+            <option value="coral">Coral</option>
+            <option value="shimmer">Shimmer</option>
+            <option value="sage">Sage</option>
+          </optgroup>
+          <optgroup label="Free (Microsoft)">
+            <option value="ur-PK-UzmaNeural">Urdu: Uzma</option>
+            <option value="ur-IN-GulNeural">Urdu: Gul</option>
+            <option value="hi-IN-SwaraNeural">Hindi: Swara</option>
+            <option value="en-IN-NeerjaNeural">English: Neerja</option>
+          </optgroup>
         </select>
         <select id="rate" title="How fast she speaks">
           <option value="-10%">a little slower</option>
@@ -132,6 +145,16 @@ async function boot() {
     idle.src = q("/idle.mp4");
     idle.play().catch(() => {});
   }
+  // ElevenLabs' and OpenAI's voices need their key on the server (live.sh --key); without one,
+  // those voices are not offered. The voice chosen last time on this machine is chosen again.
+  const voice = $("voice");
+  if (!health.eleven_voices) $("eleven").remove();
+  if (!health.openai_voices) $("openai").remove();
+  let kept = "";
+  try { kept = localStorage.getItem("live-voice") || ""; } catch {}
+  const usable = (v) => [...voice.options].some((o) => o.value === v);
+  voice.value = usable(kept) ? kept : health.eleven_voices ? "saira" : health.openai_voices ? "marin" : "ur-PK-UzmaNeural";
+  voice.addEventListener("change", () => { try { localStorage.setItem("live-voice", voice.value); } catch {} });
   const second = health.work_seconds && health.slice_frames ? health.work_seconds * health.fps / health.slice_frames : 0;
   status(second ? `Ready. One second of her takes ${second.toFixed(2)} s to draw on this card${second > 1 ? ": a long text waits a little before she starts" : ""}.` : "Ready.");
   fitPanel();
