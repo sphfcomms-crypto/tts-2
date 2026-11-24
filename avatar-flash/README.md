@@ -68,7 +68,7 @@ Settings that were tried and are worse:
   after about 25 seconds her face falls apart. 33 is the only length that held.
 - **As the model is shipped** (`FLASH_TAE=0 FLASH_SIZE=512`): 10.5 pictures a second. With the
   small decoder at 512: 19. A call needs 25.
-- Letting the model hear ahead (`FLASH_LOOK`), and making the voice louder (`FLASH_GAIN`): no
+- Letting the model hear ahead (`FLASH_AHEAD`), and making the voice louder (`FLASH_GAIN`): no
   gain in closed lips.
 
 ## Build and start
@@ -157,14 +157,14 @@ mu-law, any rate, mono). Answer: `video/mp4`, `slice_frames` pictures, silent.
 - `seq`: 0, 1, 2, ... A slice that arrives before the one in front of it waits up to 1.5 s for
   it. `seq=0` begins her again from the settled rest pose. A number already drawn is answered 409.
 - 400: not a WAV, or not one slice long. 503: as many calls as `FLASH_MAX_SESSIONS` (3) already.
-- With `FLASH_LOOK` above 0 the pictures of a slice show the sound from that many pictures
+- With `FLASH_AHEAD` above 0 the pictures of a slice show the sound from that many pictures
   earlier (`X-Lookahead-Frames`).
 
 ## Settings (environment variables, or `flash.env` next to the logs)
 
 `FLASH_MODEL` (`pro`; `lite`), `FLASH_STEPS` (4), `FLASH_SIZE` (416 for pro, 512 for lite; a
-multiple of 16), `FLASH_TAE` (1: the small decoder, pro only), `FLASH_FRAMES` (33), `FLASH_LOOK`
-(0), `FLASH_PICTURE` (`inputs/start.jpg`), `FLASH_BOX`
+multiple of 16), `FLASH_TAE` (1: the small decoder, pro only), `FLASH_FRAMES` (33), `FLASH_AHEAD`
+(0; a number in `FLASH_LOOK` is read the same way), `FLASH_PICTURE` (`inputs/start.jpg`), `FLASH_BOX`
 (`520,0,520`: left, top and size of the square in the picture's own pixels; it should land on
 whole pixels of the output), `FLASH_OUT` (`960x720`), `FLASH_FEATHER` (0.09) and
 `FLASH_FEATHER_BOTTOM` (0.14: the fade at the square's edges as a share of its size),

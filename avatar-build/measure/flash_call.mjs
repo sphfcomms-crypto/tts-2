@@ -65,7 +65,8 @@ if (process.env.RELAY) {
   }, { urls, username, credential });
 }
 
-if (!real) await page.addInitScript(({ VOICE }) => {
+const LINES = (process.env.LINES || "").split(",").filter(Boolean).map(Number);
+if (!real) await page.addInitScript(({ VOICE, LINES }) => {
   const real = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input.url;
@@ -88,8 +89,9 @@ if (!real) await page.addInitScript(({ VOICE }) => {
       her.addEventListener("icegatheringstatechange", () => her.iceGatheringState === "complete" && done());
       setTimeout(done, 3000);
     });
-    // She speaks the recording after five seconds of silence, and once more after a pause.
-    for (const at of [5, 5 + recording.duration + 3]) {
+    // She speaks the recording after five seconds of silence, and once more after a pause
+    // (LINES=5,25,50: at those seconds of the call instead).
+    for (const at of LINES.length ? LINES : [5, 5 + recording.duration + 3]) {
       const line = audio.createBufferSource();
       line.buffer = recording;
       line.connect(mouth);
@@ -99,7 +101,7 @@ if (!real) await page.addInitScript(({ VOICE }) => {
     return new Response(JSON.stringify({ sessionId: "test", sdp: her.localDescription.sdp, maxSeconds: 600 }),
       { headers: { "Content-Type": "application/json" } });
   };
-}, { VOICE });
+}, { VOICE, LINES });
 
 await page.goto(SITE, { waitUntil: "domcontentloaded" });
 // Her clips load first: the call waits for the stage anyway, but the page must have asked for it.

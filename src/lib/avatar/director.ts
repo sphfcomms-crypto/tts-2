@@ -180,6 +180,11 @@ export class Director {
     return this.live && this.filmReady;
   }
 
+  // A live call is using this stage now.
+  get inCall() {
+    return this.live;
+  }
+
   get filmReady() {
     return this.units.some(u => u.url && u.pool === "talk" && u.cue) &&
       this.units.some(u => u.url && u.name === "oa1_listen_neutral");

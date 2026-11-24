@@ -210,18 +210,26 @@ export function useLiveCall({ onCaption, onError }: Options) {
             if (avatarBus.flash) {
               // While a whole-face server is running, her head and shoulders
               // are drawn new for every picture instead. If its stream never
-              // starts on this device, her lips are drawn the other way.
+              // starts on this device, her lips are drawn the other way;
+              // except in a look of that server's own, which nothing else
+              // draws: she stays in its quiet loop, and her voice is played
+              // as it is.
+              const own = Boolean(avatarBus.flash.ownLook);
+              const instead = () => {
+                if (own) audio.muted = false;
+                else drawLips();
+              };
               const whole: FlashTalk = new FlashTalk(stage, remote, () => {
                 if (!isCurrent() || face.current !== whole) return;
                 face.current = null;
-                drawLips();
+                instead();
               }, gestures, greet);
               face.current = whole;
               whole.start().catch(() => {
                 if (!isCurrent() || face.current !== whole) return;
                 whole.stop();
                 face.current = null;
-                drawLips();
+                instead();
               });
             } else {
               drawLips();

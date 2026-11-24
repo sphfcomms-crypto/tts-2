@@ -27,8 +27,10 @@ fi
 cd "$L" || { echo "missing $L: run setup.sh first"; exit 1; }
 mkdir -p logs run
 if [ -f flash.env ]; then set -a; . ./flash.env; set +a; fi
-# FLASH_LOOK=<name>: one of the looks kept in looks/ (its picture and square; see README.md).
-if [ -n "${FLASH_LOOK:-}" ]; then
+# FLASH_LOOK=<name>: one of the looks kept in looks/ (its picture and square; see README.md). A
+# number there is the older meaning, how far ahead the model hears (FLASH_AHEAD): server.py reads it.
+if [ -n "${FLASH_LOOK:-}" ] && [ -n "${FLASH_LOOK//[0-9]/}" ]; then
+  case "$FLASH_LOOK" in *[!A-Za-z0-9_-]*) echo "FLASH_LOOK: a look's name is letters, digits, - and _"; exit 1 ;; esac
   [ -f "$HERE/looks/$FLASH_LOOK.env" ] || { echo "no look called $FLASH_LOOK in $HERE/looks"; exit 1; }
   set -a; . "$HERE/looks/$FLASH_LOOK.env"; set +a
 fi
