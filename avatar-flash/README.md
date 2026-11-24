@@ -160,6 +160,16 @@ mu-law, any rate, mono). Answer: `video/mp4`, `slice_frames` pictures, silent.
 - With `FLASH_AHEAD` above 0 the pictures of a slice show the sound from that many pictures
   earlier (`X-Lookahead-Frames`).
 
+## A day of the news anchor in one command (demo.sh)
+
+    bash avatar-flash/demo.sh ~/bulletin
+
+Run the evening before. Every `.txt` in the folder (numbered: `01-...`, `02-...`) becomes a finished
+film in her voice (`render.sh`), so the prepared items play at once, at the best size; then the live
+page starts (`live.sh`) for anything typed on the day. It opens `player.html` from the folder (Space:
+next, A: all, F: full screen) and prints the live page's address. A missing folder is made with
+the three samples. Run it again after adding texts: films already made are kept.
+
 ## Reading what you type, live, on your own card (live.sh)
 
     bash avatar-flash/live.sh              # then http://localhost:8100/live (opened for you under WSL)
