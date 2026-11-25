@@ -48,18 +48,16 @@ def run(job):
                     "-c:v", "libx264", "-crf", "16", "-pix_fmt", "yuv420p", f"{d}/base.mp4"], check=True)
     job["state"] = "lips"
     began = time.time()
-    r = subprocess.run([PY, "-m", "scripts.inference", "--unet_config_path", "configs/unet/stage2_512.yaml",
-                        "--inference_ckpt_path", "checkpoints/latentsync_unet.pt", "--inference_steps", STEPS,
-                        "--guidance_scale", "1.5", "--enable_deepcache", "--video_path", f"{d}/base.mp4",
-                        "--audio_path", f"{d}/voice.wav", "--video_out_path", f"{d}/film.mp4"],
-                       cwd=LS, capture_output=True, text=True)
-    if r.returncode != 0 or not os.path.exists(f"{d}/film.mp4"):
-        raise RuntimeError((r.stderr or r.stdout)[-800:])
+    lips.make(f"{d}/base.mp4", f"{d}/voice.wav", f"{d}/film.mp4", steps=int(STEPS))
+    if not os.path.exists(f"{d}/film.mp4"):
+        raise RuntimeError("no film came out")
     job["took"] = round(time.time() - began, 1)
     job["state"] = "done"
 
 
 def worker():
+    lips.load()
+    log(event="lips_loaded")
     while True:
         job = work.get()
         try:
@@ -103,11 +101,14 @@ def film(jid: str, request: Request):
     return FileResponse(p, media_type="video/mp4")
 
 
-@app.get("/base.mp4")
-def base(request: Request):
+IDLE = os.environ.get("REPORTER_IDLE", "/workspace/reporter/pingpong2.mp4")
+
+
+@app.get("/idle.mp4")
+def idle(request: Request):
     if not ok(request):
         return JSONResponse({"error": "no"}, 404)
-    return FileResponse(BASE, media_type="video/mp4")
+    return FileResponse(IDLE, media_type="video/mp4")
 
 
 @app.get("/")

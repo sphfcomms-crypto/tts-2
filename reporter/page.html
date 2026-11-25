@@ -37,7 +37,7 @@
 const T = "__TOKEN__";
 const $ = (id) => document.getElementById(id);
 const q = (p) => `${p}${p.includes("?") ? "&" : "?"}t=${encodeURIComponent(T)}`;
-$("idle").src = q("/base.mp4");
+$("idle").src = q("/idle.mp4");
 const queue = [];          // films ready to play, in order
 let playing = false;
 const say = (s) => { $("status").textContent = s; };
@@ -71,7 +71,14 @@ function next() {
   film.src = queue.shift();
   film.currentTime = 0;
   film.oncanplay = () => { film.oncanplay = null; film.style.opacity = 1; film.play(); };
-  film.onended = () => { film.style.opacity = 0; playing = false; next(); };
+  // Her film is her real clip from its start; when it ends, her quiet loop goes on from that very
+  // moment of the clip, so nothing jumps.
+  film.onended = () => {
+    const idle = $("idle");
+    if (idle.duration) idle.currentTime = film.duration % idle.duration;
+    idle.play().catch(() => {});
+    setTimeout(() => { film.style.opacity = 0; playing = false; next(); }, 60);
+  };
 }
 
 $("go").onclick = speak;
