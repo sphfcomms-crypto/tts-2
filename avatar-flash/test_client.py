@@ -3,7 +3,11 @@
 the speed the voice is spoken. Saves what comes back as one film with the voice, and prints how
 long each slice took from its first sound being spoken to its pictures being here.
 
-    python test_client.py <server url> <voice.wav> <out.mp4> [--key-file key.txt] [--fast]
+    python test_client.py <server url> <voice.wav> <out.mp4> [--key-file key.txt] [--fast] [--picture-lag 0.05]
+
+--picture-lag S: the film's sound starts S seconds earlier against its pictures. The model's lips run
+40-60 ms ahead of its own sound (lips closed at the moment of a p, b or m on 26 of 82 such sounds
+in its films, on 53-58 with the pictures 40-60 ms later), so a finished film is best made with 0.05.
 """
 import io
 import json
@@ -21,6 +25,7 @@ import soundfile as sf
 url, voice, out = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
 key_file = sys.argv[sys.argv.index("--key-file") + 1] if "--key-file" in sys.argv else "key.txt"
 fast = "--fast" in sys.argv
+picture_lag = float(sys.argv[sys.argv.index("--picture-lag") + 1]) if "--picture-lag" in sys.argv else 0.0
 ffmpeg = sys.argv[sys.argv.index("--ffmpeg") + 1] if "--ffmpeg" in sys.argv else "ffmpeg"
 key = open(key_file).read().strip()
 
@@ -67,7 +72,8 @@ with tempfile.TemporaryDirectory() as d:
         names.append(f"{d}/{i:04d}.mp4")
         open(names[-1], "wb").write(data)
     open(f"{d}/list.txt", "w").write("".join(f"file '{n}'\n" for n in names))
-    sf.write(f"{d}/voice.wav", np.concatenate([np.zeros(look * 16000 // fps, np.float32), x]), 16000)
+    track = np.concatenate([np.zeros(look * 16000 // fps, np.float32), x])[max(0, round(picture_lag * 16000)):]
+    sf.write(f"{d}/voice.wav", track, 16000)
     subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", f"{d}/list.txt", "-i", f"{d}/voice.wav",
                     "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest", out], check=True)
 

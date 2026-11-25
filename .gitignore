@@ -57,3 +57,7 @@ next-env.d.ts
 /avatar-build/lam/out/
 /avatar-build/measure/out/
 /avatar-build/measure/node_modules/
+
+# Python caches (avatar-flash/*.py run here)
+__pycache__/
+*.pyc

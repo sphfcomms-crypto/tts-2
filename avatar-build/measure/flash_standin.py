@@ -19,15 +19,32 @@ a real call, face and all, and can be looked at.
 
 With --own-look it stands in for a server with a look of its own (FLASH_OWN_LOOK=1): /health says
 so, and it serves the loop at /idle.mp4 and the picture at /still.jpg.
+
+    ... --live ../../avatar-flash/live.html --tts-file voice.wav
+
+With --live it serves the live page at /live (token "test"), and POST /tts answers with the
+--tts-file whatever the text, as the real server answers with her voice made from it.
+
+    ... --live ../../avatar-flash/live.html --tts-file real
+
+With "--tts-file real", POST /tts makes her voice from the text as the real server does
+(avatar-flash/voices.py: ElevenLabs' voices with ELEVENLABS_API_KEY or FLASH_ELEVEN_KEY_FILE set,
+OpenAI's with OPENAI_API_KEY or FLASH_OPENAI_KEY_FILE, and Microsoft's free ones), and /health
+says which are on.
 """
+import asyncio
 import http.server
 import json
+import os
 import struct
 import subprocess
 import sys
 import time
 
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "avatar-flash"))
+import voices  # noqa: E402  (her voice from text, as the real server makes it)
 
 voice = sys.argv[1]
 opt = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
@@ -38,6 +55,7 @@ stats = {"slices": 0, "last_seq": -1, "out_of_order": 0}
 
 FILM = opt("--film", "")
 IDLE, STILL, BADGE = opt("--own-look", ""), opt("--still", ""), opt("--badge", "")
+LIVE, TTS_FILE = opt("--live", ""), opt("--tts-file", "")
 IDLE_FRAMES = 0
 if IDLE:
     IDLE_FRAMES = int(subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
@@ -118,8 +136,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path.startswith("/health"):
             body = {"ok": True, "model": "stand-in", "fps": FPS, "slice_frames": FRAMES, "look_frames": 0,
                     "width": W, "height": H, "work_seconds": DELAY, **({"square": SQUARE} if FILM else {}), **stats,
-                    "own_look": bool(IDLE), "idle_frames": IDLE_FRAMES, "badge": BADGE}
+                    "own_look": bool(IDLE), "idle_frames": IDLE_FRAMES, "badge": BADGE,
+                    "openai_voices": TTS_FILE == "real" and bool(voices.openai_key()),
+                    "eleven_voices": TTS_FILE == "real" and bool(voices.eleven_key())}
             return self.answer(200, json.dumps(body).encode(), "application/json")
+        if self.path.startswith("/live/token") and LIVE:
+            return self.answer(200, b'{"token": "test"}', "application/json")
+        if self.path.startswith("/live") and LIVE:
+            return self.answer(200, open(LIVE, encoding="utf-8").read().replace("__TOKEN__", "test").encode(), "text/html; charset=utf-8")
         if self.path.startswith("/idle.mp4") and IDLE:
             return self.answer(200, open(IDLE, "rb").read(), "video/mp4")
         if self.path.startswith("/still.jpg") and STILL:
@@ -129,6 +153,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.answer(404, b"{}", "application/json")
 
     def do_POST(self):
+        if self.path.startswith("/tts") and TTS_FILE == "real":
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+            text, name, rate = str(body.get("text", "")).strip(), str(body.get("voice", "")), str(body.get("rate", "+0%"))
+            if not text or not voices.known(name) or not voices.RATE.fullmatch(rate):
+                return self.answer(400, b'{"error": "text, voice and rate"}', "application/json")
+            try:
+                if voices.engine(name) in ("eleven", "openai"):
+                    return self.answer(200, voices.speech(text, name, rate), "audio/wav")
+                return self.answer(200, asyncio.run(voices.edge_speech(text, name, rate)), "audio/mpeg")
+            except Exception as ex:  # noqa: BLE001
+                return self.answer(502, json.dumps({"error": f"her voice could not be made: {ex}"}).encode(), "application/json")
+        if self.path.startswith("/tts") and TTS_FILE:
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            return self.answer(200, open(TTS_FILE, "rb").read(), "audio/mpeg" if TTS_FILE.endswith(".mp3") else "audio/wav")
         if not self.path.startswith("/say"):
             return self.answer(404, b"{}", "application/json")
         began = time.time()

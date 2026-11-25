@@ -75,7 +75,11 @@ if healthy; then say "server already running (bash stop.sh first to have its siz
   done
 fi
 url() { grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' logs/flash-tunnel.log 2>/dev/null | tail -1; }
-if alive flash-tunnel cloudflared && [ -n "$(url)" ]; then say "tunnel already running"; else
+# FLASH_NO_TUNNEL=1: a server only this machine uses (render.sh): no tunnel, no registering. A
+# server with the live page (FLASH_LIVE_PAGE=1, live.sh) never gets one: its page hands out tokens.
+NO_TUNNEL="${FLASH_NO_TUNNEL:-0}"
+[ "${FLASH_LIVE_PAGE:-0}" = "1" ] && NO_TUNNEL=1
+if [ "$NO_TUNNEL" = "1" ]; then :; elif alive flash-tunnel cloudflared && [ -n "$(url)" ]; then say "tunnel already running"; else
   say "starting tunnel"
   : > logs/flash-tunnel.log
   setsid nohup bin/cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$PORT" >> logs/flash-tunnel.log 2>&1 < /dev/null 9>&- &
@@ -88,6 +92,7 @@ say "server answers /health: she is drawn at ${DRAWN:-?} pixels, GPU busy ${BUSY
 command -v nvidia-smi >/dev/null 2>&1 && say "GPU memory in use: $(nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader 2>/dev/null | head -1)"
 [ -f "$E/no-flash-attn" ] && say "(flash-attention does not run on this GPU: PyTorch's own attention is used)"
 awk "BEGIN{exit !(${BUSY:-0} > 1)}" && say "WARNING: this GPU is slower than her voice: the stream will fall behind and the filmed clips will show"
+[ "$NO_TUNNEL" = "1" ] && { say "ready (no tunnel)"; exit 0; }
 URL=""; for i in $(seq 1 60); do URL="$(url)"; [ -n "$URL" ] && break; sleep 1; done
 [ -n "$URL" ] || { say "no tunnel address, see logs/flash-tunnel.log"; exit 1; }
 for i in $(seq 1 30); do curl -fsS -m 5 -H "x-avatar-key: $KEY" "$URL/health" >/dev/null 2>&1 && break; sleep 1; done

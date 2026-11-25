@@ -160,6 +160,80 @@ mu-law, any rate, mono). Answer: `video/mp4`, `slice_frames` pictures, silent.
 - With `FLASH_AHEAD` above 0 the pictures of a slice show the sound from that many pictures
   earlier (`X-Lookahead-Frames`).
 
+## A day of the news anchor in one command (demo.sh)
+
+    bash avatar-flash/demo.sh ~/bulletin
+
+Run the evening before. Every `.txt` in the folder (numbered: `01-...`, `02-...`) becomes a finished
+film in her voice (`render.sh`), so the prepared items play at once, at the best size; then the live
+page starts (`live.sh`) for anything typed on the day. It opens `player.html` from the folder (Space:
+next, A: all, F: full screen) and prints the live page's address. A missing folder is made with
+the three samples. Run it again after adding texts: films already made are kept.
+
+## Reading what you type, live, on your own card (live.sh)
+
+    bash avatar-flash/live.sh --key        # once per key: ElevenLabs (sk_...) and/or OpenAI (sk-...)
+    bash avatar-flash/live.sh              # then http://localhost:8100/live (opened for you under WSL)
+    FLASH_SIZE=416 bash avatar-flash/live.sh
+    bash avatar-flash/live.sh --stop
+    bash avatar-flash/live.sh --forget-key # removes the saved keys
+
+It starts the server on this machine only (no tunnel, no rented GPU) with a page: type what she
+should say and press Speak. Her voice is made from the text (POST `/tts`, `voices.py`; the internet
+is needed), or taken from a voice file, and her pictures are drawn one slice at a time. The voices:
+
+- **ElevenLabs** (with its key): native Urdu voices from ElevenLabs' voice library on its newest
+  model (`eleven_v4`, `FLASH_ELEVEN_MODEL`): Saira (first on the page), Reva, Reva (soft). The most
+  natural. On the Starter plan an Urdu character cost about 0.4 credits (a minute of her: ~300).
+- **OpenAI** (with its key): Marin, Coral, Shimmer, Sage (`gpt-4o-mini-tts`, asked for the manner
+  of a news anchor).
+- **Microsoft** (no key): Uzma, Gul, Swara, Neerja (`edge-tts`).
+
+`--key` reads the key without showing it or keeping it in the shell's history, and keeps it in
+`~/tts-2-lab/elevenlabs.key` or `openai.key`, readable by you only; it is sent to its own service
+and nowhere else. At start, each service with a key is tried with two words, so a refused key or a
+blocked line shows then, not in front of anyone.
+
+A speech model now and then leaves out the end of what it was given (OpenAI's, in our tests, lost
+or garbled its closing line, like "shukriya" or "Allah hafiz", in about one reading in eight;
+ElevenLabs' left out nothing in ours). So a text is spoken in even pieces
+of a sentence or two, made a few at once, and with an OpenAI key every piece is heard back by
+OpenAI's transcriber and made again if its last words are missing (`FLASH_TTS_CHECK=0` turns this
+off). The comparison is of consonant skeletons, since the transcriber writes Urdu speech in Urdu or
+Hindi letters as it likes. The pieces are joined with a short pause; a 721-character news text
+(about a minute of her) took 11 s in Saira's voice. `python3 avatar-flash/test_voices.py` checks
+all of this without keys or the internet.
+
+She starts speaking once enough is drawn that she will
+not have to stop: at once on a card faster than her voice, after a while on a slower one (on a card
+that takes 2.2 s per second of her, an 11 s line started after 20 s and ran without a stop). Her
+quiet loop shows meanwhile, with the LIVE mark and the time. If her pictures still fall behind, her
+voice waits for them. Untick "speak as soon as ready" to prepare texts and play each with its
+button. Her voice is played 50 ms before her pictures, as in a call (`?lipLag=<ms>` changes it).
+
+## Finished films instead of a call (render.sh)
+
+For prepared texts (a news bulletin, a speech, meeting notes) she does not need to be drawn live:
+`render.sh` makes finished films on your own NVIDIA card, with no call, no OpenAI key and no
+rented GPU. There is no hurry, so she is drawn at the model's own size (512 pixels; 448 or 416
+when the card has too little memory), and the films' sound is set 50 ms ahead of their pictures,
+which is how far the model's lips lead its own sound.
+
+    mkdir ~/bulletin && cp avatar-flash/samples/*.txt ~/bulletin/     # or your own .txt files
+    bash avatar-flash/render.sh ~/bulletin                              # [voice], default ur-PK-UzmaNeural
+    cd ~/bulletin && explorer.exe player.html                            # under WSL; any browser elsewhere
+
+- Each `name.txt` becomes `name.mp4` (960x720 with her voice). Her voice is made with Microsoft's
+  free neural voices (`edge-tts`, which needs the internet); `name.wav` or `name.mp3` put in the
+  folder is used instead, as it is. A film already made is kept; delete it to have it made again.
+- `player.html` plays them as a live bulletin: her quiet loop all the time, each item faded in
+  over it with its title (the file name, without leading numbers), a LIVE mark and the time of
+  day. Space or right arrow: next; left arrow: previous; R: again; A: all in turn; F: full screen.
+- How long it takes: the script prints how many seconds one second of her takes to draw on your
+  card. On an RTX 5070 Ti at 416 pixels that was 1.93; at 512, and on a plain RTX 5070, expect more.
+- The same needs as `home.sh`: Linux or Ubuntu under WSL2, a card with 12 GB or more, about 27 GB
+  under `~/tts-2-lab` the first time. `samples/` holds three short Urdu texts to try it with.
+
 ## Settings (environment variables, or `flash.env` next to the logs)
 
 `FLASH_MODEL` (`pro`; `lite`), `FLASH_STEPS` (4), `FLASH_SIZE` (416 for pro, 512 for lite; a
@@ -254,3 +328,5 @@ box), and a call with her head over the clips against the real server on a GPU.
 | `preview.sh` | run a branch of the app on the box, with the server, behind its own link |
 | `home.sh` | the same on a machine of your own: checks it, then runs `preview.sh` under `~/tts-2-lab` |
 | `test_client.py` | feeds it a recording the way a call does; writes the film and the timings |
+| `live.sh`, `live.html` | the live page on your own card: what you type, she says |
+| `voices.py`, `test_voices.py` | her voice from text (ElevenLabs, OpenAI, Microsoft), each piece checked; its checks |

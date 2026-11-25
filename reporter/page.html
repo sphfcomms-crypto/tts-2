@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ur">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Anchor</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #000; color: #e8e8ea; font-family: system-ui, "Segoe UI", sans-serif; }
+  #stage { position: relative; width: min(100vw, calc((100vh - 170px) * 16 / 9)); aspect-ratio: 16 / 9; margin: 0 auto; background: #000; }
+  #stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #film { opacity: 0; transition: opacity 120ms; }
+  .live { position: absolute; left: 2%; top: 3%; background: #d0021b; color: #fff; font-weight: 700; padding: 2px 9px; border-radius: 3px; z-index: 2; letter-spacing: .08em; }
+  #panel { max-width: 1100px; margin: 8px auto; padding: 0 12px; display: flex; gap: 10px; align-items: flex-start; }
+  textarea { flex: 1; height: 96px; background: #0d0f14; color: #e8e8ea; border: 1px solid #2a2f3a; border-radius: 6px; padding: 8px; font-size: 17px; line-height: 1.5; }
+  button { background: #3b82f6; border: 0; color: #fff; font-weight: 600; padding: 10px 20px; border-radius: 6px; font-size: 16px; cursor: pointer; }
+  button:disabled { opacity: .5; }
+  #status { max-width: 1100px; margin: 0 auto; padding: 0 12px; color: #9aa0aa; font-size: 14px; }
+  body.full #panel, body.full #status { display: none; }
+  body.full #stage { width: min(100vw, calc(100vh * 16 / 9)); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="idle" muted loop playsinline autoplay></video>
+  <video id="film" playsinline></video>
+  <div class="live">LIVE</div>
+</div>
+<div id="panel">
+  <textarea id="text" dir="auto" placeholder="Jo text woh bolay, yahan likhein (Urdu / Hinglish / English). Ctrl+Enter = Speak"></textarea>
+  <div><button id="go">Speak</button><br><br><button id="fs" style="background:#333">Full screen (F)</button></div>
+</div>
+<div id="status"></div>
+<script>
+"use strict";
+const T = "__TOKEN__";
+const $ = (id) => document.getElementById(id);
+const q = (p) => `${p}${p.includes("?") ? "&" : "?"}t=${encodeURIComponent(T)}`;
+$("idle").src = q("/idle.mp4");
+const queue = [];          // films ready to play, in order
+let playing = false;
+const say = (s) => { $("status").textContent = s; };
+
+async function speak() {
+  const text = $("text").value.trim();
+  if (!text) return;
+  $("text").value = "";
+  const r = await fetch(q("/make"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+  const j = await r.json();
+  if (!r.ok) { say("Error: " + (j.error || r.status)); return; }
+  follow(j.id, text);
+}
+
+async function follow(id, text) {
+  const words = { waiting: "line mein", voice: "awaaz ban rahi hai", lips: "hont ban rahe hain" };
+  const began = Date.now();
+  for (;;) {
+    await new Promise((res) => setTimeout(res, 1500));
+    const j = await (await fetch(q(`/job/${id}`))).json();
+    if (j.state === "done") { say(""); queue.push(q(`/film/${id}.mp4`)); next(); return; }
+    if (j.state === "failed") { say("Nahi ban saka: " + (j.error || "")); return; }
+    say(`"${text.slice(0, 50)}" : ${words[j.state] || j.state}... ${Math.round((Date.now() - began) / 1000)} s${j.seconds ? ` (${j.seconds} s ki baat)` : ""}`);
+  }
+}
+
+function next() {
+  if (playing || !queue.length) return;
+  playing = true;
+  const film = $("film");
+  film.src = queue.shift();
+  film.currentTime = 0;
+  film.oncanplay = () => { film.oncanplay = null; film.style.opacity = 1; film.play(); };
+  // Her film is her real clip from its start; when it ends, her quiet loop goes on from that very
+  // moment of the clip, so nothing jumps.
+  film.onended = () => {
+    const idle = $("idle");
+    if (idle.duration) idle.currentTime = film.duration % idle.duration;
+    idle.play().catch(() => {});
+    setTimeout(() => { film.style.opacity = 0; playing = false; next(); }, 60);
+  };
+}
+
+$("go").onclick = speak;
+$("text").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.ctrlKey) speak(); });
+$("fs").onclick = () => { document.documentElement.requestFullscreen?.(); document.body.classList.add("full"); };
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "TEXTAREA") return;
+  if (e.key === "f" || e.key === "F") $("fs").onclick();
+});
+document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement) document.body.classList.remove("full"); });
+</script>
+</body>
+</html>
